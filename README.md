@@ -11,8 +11,9 @@ Backend của dự án EventHub, sử dụng Java 21, Spring Boot và Maven. REA
 | Web | Spring Web MVC, cung cấp REST API |
 | Build | Maven, có Maven Wrapper trong repository |
 | Kiểm thử | Spring Boot Test và JUnit |
+| Database | PostgreSQL 16+, Spring Data JPA, Flyway |
 
-Hiện tại dự án có bộ khung ứng dụng và bài kiểm thử khởi tạo Spring context. Chưa có API nghiệp vụ, cấu hình database, JPA, xác thực hay phân quyền. Các ví dụ tên class trong tài liệu là quy ước để phát triển tiếp, không có nghĩa là chức năng đó đã được triển khai.
+Hiện tại dự án có 19 entity và repository theo sơ đồ EventHub, migration tạo database schema và kiểm thử tích hợp PostgreSQL. Chưa có API nghiệp vụ hay luồng đăng nhập/phân quyền riêng; Spring Security đang dùng cấu hình mặc định.
 
 ## 2. Chuẩn bị và chạy dự án
 
@@ -22,6 +23,8 @@ Hiện tại dự án có bộ khung ứng dụng và bài kiểm thử khởi t
 - IDE có thể dùng IntelliJ IDEA, VS Code hoặc Eclipse; đặt SDK của dự án là Java 21.
 - Có kết nối Internet trong lần build đầu để tải Maven và các dependency.
 - Không bắt buộc cài Maven riêng vì dự án đã có `mvnw` và `mvnw.cmd`.
+- PostgreSQL đang chạy và đã tạo database `eventhub_db`.
+- Khi chạy test mặc định: Docker đang chạy để Testcontainers tạo PostgreSQL riêng. Có thể dùng database test riêng khi không có Docker (hướng dẫn bên dưới).
 
 Kiểm tra môi trường:
 
@@ -57,9 +60,70 @@ Chạy lệnh tại thư mục gốc, nơi chứa `pom.xml`:
 
 Trên macOS/Linux, nếu thiếu quyền thực thi, chạy `chmod +x mvnw` một lần.
 
-Ứng dụng mặc định chạy tại `http://localhost:8080`. Khi chưa có controller, truy cập `/` có thể trả về 404; kiểm tra log khởi động để xác nhận ứng dụng đang chạy. Dùng `Ctrl+C` để dừng.
+Ứng dụng mặc định chạy tại `http://localhost:8080`. Spring Security mặc định có thể yêu cầu đăng nhập; kiểm tra log khởi động để xác nhận ứng dụng đang chạy. Dùng `Ctrl+C` để dừng.
 
-Cấu hình chung đặt tại `src/main/resources/application.properties`. Khi bổ sung database hoặc dịch vụ ngoài, dùng biến môi trường cho mật khẩu và khóa bí mật; chỉ commit cấu hình mẫu không chứa giá trị thật. `.env` không được Spring Boot tự động đọc và hiện cũng chưa nằm trong `.gitignore`.
+Cấu hình chung đặt tại `src/main/resources/application.properties`. Dùng biến môi trường cho mật khẩu và khóa bí mật; chỉ commit cấu hình mẫu không chứa giá trị thật. `.env` đã được bỏ qua trong Git nhưng Spring Boot không tự động đọc file này.
+
+### Kết nối PostgreSQL
+
+Ứng dụng mặc định kết nối `jdbc:postgresql://localhost:5432/eventhub_db`, user `postgres`.
+Database cần được tạo sẵn; Flyway tạo các bảng khi ứng dụng khởi động.
+
+| Biến môi trường | Mặc định |
+| --- | --- |
+| `DB_URL` | `jdbc:postgresql://localhost:5432/eventhub_db` |
+| `DB_USERNAME` | `postgres` |
+| `DB_PASSWORD` | Trống; cần đặt mật khẩu PostgreSQL của máy |
+
+PowerShell:
+
+```powershell
+$env:DB_URL = "jdbc:postgresql://localhost:5432/eventhub_db"
+$env:DB_USERNAME = "postgres"
+$dbCredential = Get-Credential -UserName postgres -Message "PostgreSQL credentials"
+$env:DB_PASSWORD = $dbCredential.GetNetworkCredential().Password
+.\mvnw.cmd spring-boot:run
+```
+
+Hoặc copy `application-local.properties.example` thành `application-local.properties` **ở thư mục gốc dự án**, rồi điền mật khẩu. File này được nạp tự động khi chạy từ thư mục gốc và đã nằm trong `.gitignore`; không cần bật profile. Giá trị trong file local có ưu tiên hơn các placeholder `DB_*` ở cấu hình chung; chọn một cách cấu hình để tránh nhầm lẫn.
+
+### Entity và migration
+
+- Entity: `src/main/java/com/eventhub/backend/entity/`; repository: `src/main/java/com/eventhub/backend/repository/`.
+- Migration: `src/main/resources/db/migration/V1__create_eventhub_schema.sql`.
+- Hibernate dùng `ddl-auto=validate`: chỉ kiểm tra mapping, Flyway chịu trách nhiệm thay đổi schema. Cấu hình này theo [hướng dẫn Spring Boot](https://docs.spring.io/spring-boot/how-to/data-initialization.html).
+- Sau khi V1 đã chạy, mọi thay đổi schema cần file mới như `V2__add_event_field.sql`; không sửa migration đã áp dụng. Không bật tự động baseline cho database đã có bảng.
+- Các quan hệ dùng lazy loading, không cascade xóa. Khóa ngoại ngăn xóa bản ghi còn được tham chiếu; PostgreSQL có index trên các cột khóa ngoại.
+
+Điều chỉnh so với ký hiệu MySQL trong sơ đồ:
+
+- `int(10)` → PostgreSQL `INTEGER`/Java `Integer`, ID tự tăng bằng identity. Tên bảng/cột dùng chữ thường, gồm `categories`/`categories_id`.
+- Tiền dùng `NUMERIC(19,2)`/`BigDecimal` thay cho `double`. Schema chưa có cột tiền tệ; tầng nghiệp vụ cần thống nhất đơn vị khi triển khai thanh toán.
+- `datetime` → `TIMESTAMP(6) WITHOUT TIME ZONE`/`LocalDateTime`, quy ước giá trị là UTC; giao diện cần chuyển múi giờ khi hiển thị.
+- `created_at` và `updated_at` (ở các bảng có cột này) được JPA tự gán, luôn có giá trị; SQL có default khi insert. Khi update bằng SQL trực tiếp/bulk query, phải tự cập nhật `updated_at`.
+- `is_read` dùng Boolean, mặc định false; `reserved_quantity` và `retry_count` mặc định 0. Các số dư ví mặc định 0.
+- `reviewed_by`, `checked_in_at`, `refunded_at`, `processed_by`, `processed_at`, `completed_at` và `transaction_code` của rút tiền/chi trả cho phép NULL khi thao tác chưa xảy ra.
+- Unique theo cặp `event_staffs(events_id, staff_id)` và `booking_items(bookings_id, ticket_types_id)`: một sự kiện có nhiều nhân viên, một đơn có nhiều loại vé. Mỗi organizer có tối đa một ví, mỗi payment có tối đa một refund.
+- Có CHECK cho tiền/số lượng không âm, số lượng vé đặt mua dương, tổng vé giữ chỗ và vé còn lại không vượt số vé, thời gian kết thúc không trước thời gian bắt đầu.
+- Các trường `role`, `status`, `type` giữ dạng chuỗi như sơ đồ; chưa tự đặt enum/trạng thái nghiệp vụ.
+
+### Kiểm thử database
+
+`mvnw test` và `mvnw clean verify` mặc định dùng Testcontainers với `postgres:16-alpine`. PostgreSQL test tách biệt với `eventhub_db`, tự dọn khi Spring context đóng; các test dữ liệu chạy trong transaction và rollback. Lần đầu cần mạng để tải image.
+
+Bộ test chạy Flyway, Hibernate validate, lưu/đọc 19 entity, kiểm tra số tiền chính xác, audit timestamps, unique, khóa ngoại, tồn vé và chạy lại migration.
+
+Nếu không dùng Docker, tạo **database test riêng, trống** và cung cấp thông tin rõ ràng:
+
+```powershell
+$env:TEST_DB_URL = "jdbc:postgresql://localhost:5432/eventhub_test"
+$env:TEST_DB_USERNAME = "postgres"
+$testCredential = Get-Credential -UserName postgres -Message "Test PostgreSQL credentials"
+$env:TEST_DB_PASSWORD = $testCredential.GetNetworkCredential().Password
+.\mvnw.cmd "-Dtest.database.mode=external" clean verify
+```
+
+Chế độ external giữ lại schema và lịch sử Flyway để dùng lại; không trỏ `TEST_DB_URL` tới database nghiệp vụ.
 
 ## 3. Cấu trúc thư mục và nơi đặt mã nguồn
 
