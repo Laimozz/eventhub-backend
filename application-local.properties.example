@@ -2,3 +2,12 @@
 spring.datasource.url=jdbc:postgresql://localhost:5432/eventhub_db
 spring.datasource.username=postgres
 spring.datasource.password=
+
+# Generate a random Base64 key containing at least 32 bytes, then paste it here.
+app.auth.jwt-secret=
+app.auth.access-token-ttl=15m
+app.auth.refresh-token-ttl=7d
+# Development over HTTP only. Use true with HTTPS in deployed environments.
+app.auth.cookie-secure=false
+app.auth.cookie-same-site=Lax
+app.auth.allowed-origins=http://localhost:5173,http://localhost:3000

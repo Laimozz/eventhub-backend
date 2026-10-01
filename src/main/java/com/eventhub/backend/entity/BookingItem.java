@@ -3,6 +3,9 @@ package com.eventhub.backend.entity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -19,7 +22,11 @@ import lombok.Setter;
 @Table(name = "booking_items", uniqueConstraints = {
         @UniqueConstraint(name = "uk_booking_items_bookings_id_ticket_types_id", columnNames = {"bookings_id", "ticket_types_id"})
 })
-public class BookingItem extends BaseEntity {
+public class BookingItem {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "bookings_id", nullable = false)
