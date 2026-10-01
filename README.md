@@ -13,7 +13,7 @@ Backend của dự án EventHub, sử dụng Java 21, Spring Boot và Maven. REA
 | Kiểm thử | Spring Boot Test và JUnit |
 | Database | PostgreSQL 16+, Spring Data JPA, Flyway |
 
-Hiện tại dự án có 19 entity và repository theo sơ đồ EventHub, migration tạo database schema và kiểm thử tích hợp PostgreSQL. Chưa có API nghiệp vụ hay luồng đăng nhập/phân quyền riêng; Spring Security đang dùng cấu hình mặc định.
+Hiện tại dự án có 20 entity/repository, migration Flyway và kiểm thử tích hợp PostgreSQL. API chỉ gồm đăng ký, đăng nhập, refresh và đăng xuất bằng JWT qua HttpOnly Cookie. Xem [tài liệu API](api-endpoints.md) để tích hợp cookie và header bảo vệ CSRF.
 
 ## 2. Chuẩn bị và chạy dự án
 
@@ -60,7 +60,7 @@ Chạy lệnh tại thư mục gốc, nơi chứa `pom.xml`:
 
 Trên macOS/Linux, nếu thiếu quyền thực thi, chạy `chmod +x mvnw` một lần.
 
-Ứng dụng mặc định chạy tại `http://localhost:8080`. Spring Security mặc định có thể yêu cầu đăng nhập; kiểm tra log khởi động để xác nhận ứng dụng đang chạy. Dùng `Ctrl+C` để dừng.
+Ứng dụng mặc định chạy tại `http://localhost:8080`. Cần cấu hình `JWT_SECRET` trước khi khởi động; API dùng cookie xác thực thay cho trang đăng nhập mặc định. Dùng `Ctrl+C` để dừng.
 
 Cấu hình chung đặt tại `src/main/resources/application.properties`. Dùng biến môi trường cho mật khẩu và khóa bí mật; chỉ commit cấu hình mẫu không chứa giá trị thật. `.env` đã được bỏ qua trong Git nhưng Spring Boot không tự động đọc file này.
 
@@ -87,10 +87,40 @@ $env:DB_PASSWORD = $dbCredential.GetNetworkCredential().Password
 
 Hoặc copy `application-local.properties.example` thành `application-local.properties` **ở thư mục gốc dự án**, rồi điền mật khẩu. File này được nạp tự động khi chạy từ thư mục gốc và đã nằm trong `.gitignore`; không cần bật profile. Giá trị trong file local có ưu tiên hơn các placeholder `DB_*` ở cấu hình chung; chọn một cách cấu hình để tránh nhầm lẫn.
 
+### Cấu hình xác thực
+
+Tạo khóa JWT ngẫu nhiên cho môi trường local bằng PowerShell:
+
+```powershell
+$jwtKey = New-Object byte[] 32
+$jwtRandom = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$jwtRandom.GetBytes($jwtKey)
+$env:JWT_SECRET = [Convert]::ToBase64String($jwtKey)
+$jwtRandom.Dispose()
+$env:AUTH_COOKIE_SECURE = "false" # Chỉ cho local HTTP
+.\mvnw.cmd spring-boot:run
+```
+
+Hoặc đặt `app.auth.jwt-secret` và `app.auth.cookie-secure=false` trong `application-local.properties` theo file mẫu. Nếu file local khai báo các giá trị này, chúng ưu tiên hơn placeholder môi trường trong cấu hình chung; không để khóa trống trong file local khi định dùng `JWT_SECRET`.
+
+Môi trường triển khai dùng khóa riêng lưu trong secret manager/biến môi trường và đặt `AUTH_COOKIE_SECURE=true` với HTTPS (cấu hình chung mặc định `false` cho local HTTP). Giữ khóa ổn định giữa các lần restart và các instance; đổi khóa làm access token cũ mất hiệu lực. Đăng ký công khai yêu cầu frontend gửi `role` là CUSTOMER hoặc ORGANIZER; ADMIN và STAFF không được tự đăng ký. Đăng ký chỉ trả thông báo thành công, chưa tạo phiên; đăng nhập mới trả thông tin user và hai cookie token.
+
+`ApplicationProperties` tập trung các cấu hình tùy chỉnh `app.*` với nhóm `auth`; cấu hình `spring.*` vẫn do Spring Boot quản lý. Thời hạn access token và refresh token được đặt trong `application.properties`, dùng chung cho JWT, cookie và thời hạn phiên trong database:
+
+```properties
+app.auth.access-token-ttl=${JWT_ACCESS_TOKEN_TTL:15m}
+app.auth.refresh-token-ttl=${JWT_REFRESH_TOKEN_TTL:7d}
+```
+
+Có thể thay đổi bằng biến môi trường tương ứng hoặc cấu hình trong file local. Giá trị phải là số giây nguyên dương, ví dụ `30s`, `15m`, `7d`.
+
+Frontend cần gửi credentials và header `X-CSRF-Protection: 1` khi gọi POST. Không cần endpoint lấy CSRF token. Chi tiết 4 endpoint, rotation và ví dụ Fetch nằm trong [api-endpoints.md](api-endpoints.md).
+
 ### Entity và migration
 
 - Entity: `src/main/java/com/eventhub/backend/entity/`; repository: `src/main/java/com/eventhub/backend/repository/`.
-- Migration: `src/main/resources/db/migration/V1__create_eventhub_schema.sql`.
+- Mỗi entity là class độc lập, khai báo trực tiếp `id` và các trường thời gian tương ứng với bảng. Các callback `@PrePersist`/`@PreUpdate` nằm ngay trong entity; không dùng lớp cha chung.
+- Migration: `src/main/resources/db/migration/`: V1 schema, V2 thêm xác thực/refresh tokens với `revoked BOOLEAN NOT NULL DEFAULT FALSE` và cho phép role STAFF. V2/V3 cũ chưa áp dụng nên được gộp vào V2; không còn V3.
 - Hibernate dùng `ddl-auto=validate`: chỉ kiểm tra mapping, Flyway chịu trách nhiệm thay đổi schema. Cấu hình này theo [hướng dẫn Spring Boot](https://docs.spring.io/spring-boot/how-to/data-initialization.html).
 - Sau khi V1 đã chạy, mọi thay đổi schema cần file mới như `V2__add_event_field.sql`; không sửa migration đã áp dụng. Không bật tự động baseline cho database đã có bảng.
 - Các quan hệ dùng lazy loading, không cascade xóa. Khóa ngoại ngăn xóa bản ghi còn được tham chiếu; PostgreSQL có index trên các cột khóa ngoại.
@@ -105,13 +135,13 @@ Hoặc copy `application-local.properties.example` thành `application-local.pro
 - `reviewed_by`, `checked_in_at`, `refunded_at`, `processed_by`, `processed_at`, `completed_at` và `transaction_code` của rút tiền/chi trả cho phép NULL khi thao tác chưa xảy ra.
 - Unique theo cặp `event_staffs(events_id, staff_id)` và `booking_items(bookings_id, ticket_types_id)`: một sự kiện có nhiều nhân viên, một đơn có nhiều loại vé. Mỗi organizer có tối đa một ví, mỗi payment có tối đa một refund.
 - Có CHECK cho tiền/số lượng không âm, số lượng vé đặt mua dương, tổng vé giữ chỗ và vé còn lại không vượt số vé, thời gian kết thúc không trước thời gian bắt đầu.
-- Các trường `role`, `status`, `type` giữ dạng chuỗi như sơ đồ; chưa tự đặt enum/trạng thái nghiệp vụ.
+- `users.role` ánh xạ enum Role, mỗi user chỉ có một role ADMIN/CUSTOMER/ORGANIZER/STAFF. Khi được phân công, nghiệp vụ đổi role CUSTOMER thành STAFF trong database. Auth chỉ cho phép user có `status=ACTIVE`, đọc trực tiếp role hiện tại và không truy vấn phân công trong `event_staffs`; `UserResponse` và JWT chỉ có `role`, không có tập `roles`. Chưa có API quản lý phân công. Các status/type nghiệp vụ khác vẫn giữ dạng chuỗi.
 
 ### Kiểm thử database
 
 `mvnw test` và `mvnw clean verify` mặc định dùng Testcontainers với `postgres:16-alpine`. PostgreSQL test tách biệt với `eventhub_db`, tự dọn khi Spring context đóng; các test dữ liệu chạy trong transaction và rollback. Lần đầu cần mạng để tải image.
 
-Bộ test chạy Flyway, Hibernate validate, lưu/đọc 19 entity, kiểm tra số tiền chính xác, audit timestamps, unique, khóa ngoại, tồn vé và chạy lại migration.
+Bộ test chạy Flyway, Hibernate validate, ràng buộc dữ liệu và 4 luồng auth qua MockMvc trên PostgreSQL thật. Kiểm tra đăng ký không tạo phiên, hash, thời hạn token/cookie theo cấu hình, role STAFF lấy từ database, header CSRF/CORS, token sai/hết hạn/rotation, refresh đồng thời, đăng xuất, user bị khóa và nâng V1 lên V2 với cột boolean `revoked`. Khóa JWT test riêng được nạp tự động. Dữ liệu fixture auth được dọn sau mỗi test; các test database dùng transaction rollback hoặc schema tạm riêng.
 
 Nếu không dùng Docker, tạo **database test riêng, trống** và cung cấp thông tin rõ ràng:
 
@@ -171,7 +201,7 @@ Các đường dẫn trong bảng dưới đây tính từ `src/main/java/com/ev
 | --- | --- | --- |
 | `config/` | Cấu hình Spring, bean dùng chung, CORS | `WebConfig.java` |
 | `controller/` | Endpoint, nhận request và trả HTTP response | `EventController.java` |
-| `service/` | Interface mô tả các thao tác nghiệp vụ | `EventService.java` |
+| `service/` | Xử lý nghiệp vụ; chỉ tách interface/implementation khi cần | `AuthService.java` |
 | `repository/` | Truy vấn và lưu dữ liệu khi bổ sung tầng persistence | `EventRepository.java` |
 | `entity/` | Đối tượng ánh xạ dữ liệu database khi bổ sung JPA | `Event.java`, `User.java` |
 | `dto/request/` | Dữ liệu nhận từ client, quy tắc validation đầu vào | `CreateEventRequest.java` |

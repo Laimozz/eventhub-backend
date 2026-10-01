@@ -1,11 +1,13 @@
 package com.eventhub.backend;
 
 import com.eventhub.backend.entity.*;
+import com.eventhub.backend.enums.Role;
 import com.eventhub.backend.repository.BookingRepository;
 import com.eventhub.backend.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
@@ -16,6 +18,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestConstructor;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -23,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Import(PostgresTestConfiguration.class)
+@TestPropertySource(locations = "classpath:auth-test.properties")
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
 class DatabaseIntegrationTests {
 
@@ -51,7 +55,7 @@ class DatabaseIntegrationTests {
                 "users", "venues", "categories", "events", "ticket_types", "event_staffs",
                 "event_guests", "user_event_interactions", "bookings", "booking_items",
                 "tickets", "payments", "refunds", "notifications", "ai_conversations",
-                "ai_messages", "organizer_wallets", "withdrawal_requests", "payout_transactions");
+                "ai_messages", "organizer_wallets", "withdrawal_requests", "payout_transactions", "refresh_tokens");
         flyway.validate();
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(flyway.migrate().migrationsExecuted).isZero();
@@ -165,6 +169,34 @@ class DatabaseIntegrationTests {
         assertThat(loadedPayout.getCompletedAt()).isNull();
         assertThat(loadedPayout.getCreatedAt()).isNotNull();
         assertThat(loadedPayout.getUpdatedAt()).isNotNull();
+
+        // Each independent entity must maintain its own audit callbacks after inheritance is removed.
+        Map<String, Integer> auditedRows = Map.of(
+                "users", fixture.user().getId(), "bookings", fixture.booking().getId(),
+                "events", fixture.event().getId(), "event_guests", guest.getId(),
+                "refunds", refund.getId(), "ai_conversations", conversation.getId(),
+                "organizer_wallets", wallet.getId(), "withdrawal_requests", withdrawal.getId(),
+                "payout_transactions", payout.getId());
+        LocalDateTime previous = LocalDateTime.of(2000, 1, 1, 0, 0);
+        auditedRows.forEach((table, id) -> jdbc.update(
+                "UPDATE " + table + " SET created_at = ?, updated_at = ? WHERE id = ?", previous, previous, id));
+        entityManager.clear();
+        entityManager.find(User.class, fixture.user().getId()).setFullName("Updated user");
+        entityManager.find(Booking.class, fixture.booking().getId()).setStatus("UPDATED");
+        entityManager.find(Event.class, fixture.event().getId()).setName("Updated event");
+        entityManager.find(EventGuest.class, guest.getId()).setName("Updated guest");
+        entityManager.find(Refund.class, refund.getId()).setStatus("UPDATED");
+        entityManager.find(AiConversation.class, conversation.getId()).setTitle("Updated conversation");
+        entityManager.find(OrganizerWallet.class, wallet.getId()).setAvailableBalance(new BigDecimal("2000.30"));
+        entityManager.find(WithdrawalRequest.class, withdrawal.getId()).setStatus("UPDATED");
+        entityManager.find(PayoutTransaction.class, payout.getId()).setStatus("UPDATED");
+        entityManager.flush();
+        auditedRows.forEach((table, id) -> {
+            assertThat(jdbc.queryForObject("SELECT created_at FROM " + table + " WHERE id = ?", LocalDateTime.class, id))
+                    .as(table + " created_at").isEqualTo(previous);
+            assertThat(jdbc.queryForObject("SELECT updated_at FROM " + table + " WHERE id = ?", LocalDateTime.class, id))
+                    .as(table + " updated_at").isAfter(previous);
+        });
     }
 
     @Test
@@ -297,6 +329,39 @@ class DatabaseIntegrationTests {
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    @Test
+    void shouldUpgradeV1ToV2WithBooleanRevocationAndPersistedStaffRole() {
+        String schema = "auth_migration_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema).defaultSchema(schema)
+                    .target("1").load().migrate();
+            jdbc.update("INSERT INTO " + schema + ".users (id, email, password, role, status) "
+                    + "VALUES (1, 'migration@example.invalid', 'test-hash', 'CUSTOMER', 'ACTIVE')");
+            Flyway upgraded = Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema)
+                    .defaultSchema(schema).load();
+            assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("2");
+            assertThat(upgraded.info().pending()).isEmpty();
+            jdbc.update("UPDATE " + schema + ".users SET role = 'STAFF' WHERE id = 1");
+            assertThat(jdbc.queryForObject("SELECT role FROM " + schema + ".users WHERE id = 1", String.class))
+                    .isEqualTo("STAFF");
+            jdbc.update("INSERT INTO " + schema + ".refresh_tokens (users_id, token_hash, expires_at) "
+                    + "VALUES (1, ?, (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + INTERVAL '7 days')", "a".repeat(64));
+            assertThat(jdbc.queryForObject("SELECT revoked FROM " + schema + ".refresh_tokens", Boolean.class)).isFalse();
+            jdbc.update("UPDATE " + schema + ".refresh_tokens SET revoked = true");
+            assertThat(jdbc.queryForObject("SELECT revoked FROM " + schema + ".refresh_tokens", Boolean.class)).isTrue();
+            assertThat(jdbc.queryForList("SELECT column_name FROM information_schema.columns "
+                    + "WHERE table_schema = ? AND table_name = 'refresh_tokens'", String.class, schema))
+                    .contains("revoked").doesNotContain("revoked_at");
+            assertThat(jdbc.queryForObject("SELECT is_nullable FROM information_schema.columns "
+                    + "WHERE table_schema = ? AND table_name = 'refresh_tokens' AND column_name = 'revoked'",
+                    String.class, schema)).isEqualTo("NO");
+        } finally {
+            // Only the uniquely named schema created by this test is removed.
+            jdbc.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+        }
+    }
+
     private Fixture createFixture() {
         User user = createUser();
         Venue venue = new Venue();
@@ -330,7 +395,7 @@ class DatabaseIntegrationTests {
         user.setEmail(UUID.randomUUID() + "@example.invalid");
         // Intentionally not a usable login credential; authentication is outside this test.
         user.setPassword("{invalid}test-hash");
-        user.setRole("TEST");
+        user.setRole(Role.CUSTOMER);
         user.setStatus("TEST");
         return users.saveAndFlush(user);
     }
