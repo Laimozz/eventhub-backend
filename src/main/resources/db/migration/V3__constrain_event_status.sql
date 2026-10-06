@@ -1,0 +1,5 @@
+ALTER TABLE events ADD CONSTRAINT ck_events_status
+    CHECK (status IN (
+        'PENDING_APPROVAL', 'APPROVED', 'ONGOING',
+        'COMPLETED', 'PENDING_CANCELLATION', 'CANCELED'
+    ));

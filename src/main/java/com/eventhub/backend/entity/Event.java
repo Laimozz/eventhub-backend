@@ -1,7 +1,10 @@
 package com.eventhub.backend.entity;
 
+import com.eventhub.backend.enums.EventStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -17,6 +20,8 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -30,10 +35,12 @@ public class Event {
     private Integer id;
 
     @Setter(AccessLevel.NONE)
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @Setter(AccessLevel.NONE)
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -68,24 +75,30 @@ public class Event {
     @Column(name = "image_zone_url", nullable = true)
     private String imageZoneUrl;
 
+    // Bind UTC wall-clock values directly, without the JVM default time zone shifting them.
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "start_time", nullable = false)
     private LocalDateTime startTime;
 
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "end_time", nullable = false)
     private LocalDateTime endTime;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
-    private String status;
+    private EventStatus status;
 
     @Column(name = "cancel_reason", nullable = true)
     private String cancelReason;
 
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "canceled_at", nullable = true)
     private LocalDateTime canceledAt;
 
     @Column(name = "reject_reason", nullable = true)
     private String rejectReason;
 
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "reviewed_at", nullable = true)
     private LocalDateTime reviewedAt;
 

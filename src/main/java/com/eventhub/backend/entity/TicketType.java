@@ -14,6 +14,8 @@ import java.time.LocalDateTime;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -51,9 +53,11 @@ public class TicketType {
     @Column(name = "remaining_quantity", nullable = false)
     private Integer remainingQuantity;
 
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "sale_start_time", nullable = false)
     private LocalDateTime saleStartTime;
 
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "sale_end_time", nullable = false)
     private LocalDateTime saleEndTime;
 
