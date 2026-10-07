@@ -118,13 +118,13 @@ class EventIntegrationTests {
     void cleanOnlyThisTestsData() throws Exception {
         if (admin != null) {
             jdbc.update("DELETE FROM notifications WHERE users_id = ?", admin.getId());
-            jdbc.update("DELETE FROM users WHERE id = ?", admin.getId());
         }
         jdbc.update("DELETE FROM event_guests WHERE events_id IN (SELECT id FROM events WHERE organizer_id = ?)",
                 organizer.getId());
         jdbc.update("DELETE FROM ticket_types WHERE events_id IN (SELECT id FROM events WHERE organizer_id = ?)",
                 organizer.getId());
         jdbc.update("DELETE FROM events WHERE organizer_id = ?", organizer.getId());
+        if (admin != null) jdbc.update("DELETE FROM users WHERE id = ?", admin.getId());
         jdbc.update("DELETE FROM venues WHERE address = ?", venueAddress);
         jdbc.update("DELETE FROM categories WHERE id = ?", category.getId());
         jdbc.update("DELETE FROM refresh_tokens WHERE users_id = ?", organizer.getId());
@@ -499,6 +499,242 @@ class EventIntegrationTests {
 
     private ResultActions create(Map<String, Object> body) throws Exception {
         return createWithImages(body, validImages());
+    }
+
+    @Test
+    void shouldPaginateSearchAndFilterOrganizerEvents() throws Exception {
+        int firstId = createEventId();
+        int secondId = createEventId();
+        jdbc.update("UPDATE events SET status = 'APPROVED' WHERE id = ?", secondId);
+        mvc.perform(get("/api/events/mine").cookie(access).param("size", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(2)).andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.statusCounts.PENDING_APPROVAL").value(1))
+                .andExpect(jsonPath("$.statusCounts.APPROVED").value(1));
+        mvc.perform(get("/api/events/mine").cookie(access).param("status", "PENDING_APPROVAL")
+                .param("search", "ORGANIZER test"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].id").value(firstId))
+                .andExpect(jsonPath("$.totalElements").value(1));
+        mvc.perform(get("/api/events/mine").cookie(access).param("search", "%"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(0));
+        mvc.perform(get("/api/events/mine").cookie(access).param("size", "51")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/events/mine").cookie(access).param("status", "DRAFT")).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void shouldHideOtherOrganizersEventsForEveryOperation() throws Exception {
+        int eventId = createEventId();
+        var body = updateRequest(eventId);
+        createAdmin("ACTIVE");
+        jdbc.update("UPDATE events SET organizer_id = ? WHERE id = ?", admin.getId(), eventId);
+        try {
+            mvc.perform(get("/api/events/mine").cookie(access)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(0));
+            mvc.perform(get("/api/events/{eventId}", eventId).cookie(access)).andExpect(status().isNotFound());
+            update(eventId, body, Map.of()).andExpect(status().isNotFound());
+            mvc.perform(post("/api/events/{eventId}/cancel", eventId).cookie(access).header("X-CSRF-Protection", "1")
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Test cancellation\"}"))
+                    .andExpect(status().isNotFound());
+        } finally {
+            jdbc.update("UPDATE events SET organizer_id = ? WHERE id = ?", organizer.getId(), eventId);
+        }
+    }
+
+    @Test
+    void shouldUpdateWithoutReuploadingAndPreserveAllocatedTickets() throws Exception {
+        createAdmin("ACTIVE");
+        int eventId = createEventId();
+        var body = updateRequest(eventId);
+        int ticketId = firstTicket(body).get("id") instanceof Number number ? number.intValue() : -1;
+        jdbc.update("UPDATE events SET status = 'APPROVED', reviewed_by = ?, reviewed_at = start_time WHERE id = ?", admin.getId(), eventId);
+        jdbc.update("UPDATE ticket_types SET remaining_quantity = 50, reserved_quantity = 3, status = 'ACTIVE' WHERE id = ?", ticketId);
+        String banner = (String) body.get("bannerImageUrl");
+        firstTicket(body).put("quantity", 65);
+        ticketInputs(body).get(1).put("quantity", 35);
+        body.put("name", "Updated organizer event");
+        org.mockito.Mockito.clearInvocations(images);
+        update(eventId, body, Map.of()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Updated organizer event"))
+                .andExpect(jsonPath("$.status").value("PENDING_APPROVAL"))
+                .andExpect(jsonPath("$.bannerImageUrl").value(banner))
+                .andExpect(jsonPath("$.ticketTypes[0].id").value(ticketId))
+                .andExpect(jsonPath("$.ticketTypes[0].remainingQuantity").value(55))
+                .andExpect(jsonPath("$.ticketTypes[0].reservedQuantity").value(3))
+                .andExpect(jsonPath("$.ticketTypes[0].status").value("INACTIVE"));
+        verify(images, never()).upload(any(), anyString());
+        assertThat(jdbc.queryForMap("SELECT reviewed_by, reviewed_at FROM events WHERE id = ?", eventId))
+                .containsEntry("reviewed_by", null).containsEntry("reviewed_at", null);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications WHERE users_id = ?", Integer.class, admin.getId())).isEqualTo(2);
+    }
+
+    @Test
+    void shouldAddRemoveAndReplaceTicketAndGuestImagesOnUpdate() throws Exception {
+        int eventId = createEventId();
+        var body = updateRequest(eventId);
+        var tickets = ticketInputs(body);
+        int removedId = ((Number) tickets.remove(1).get("id")).intValue();
+        var newTicket = new HashMap<>(firstTicket(body));
+        newTicket.remove("id"); newTicket.put("name", "New ticket"); newTicket.put("quantity", 20);
+        tickets.add(newTicket);
+        body.put("guests", List.of(Map.of("name", "New guest", "role", "MC")));
+        update(eventId, body, Map.of()).andExpect(status().isBadRequest());
+        update(eventId, body, Map.of("ticketImage1", pngImage("ticketImage1"), "bannerImage", pngImage("bannerImage"),
+                "guestImage0", pngImage("guestImage0"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.ticketTypes.length()").value(2))
+                .andExpect(jsonPath("$.ticketTypes[1].name").value("New ticket"))
+                .andExpect(jsonPath("$.guests.length()").value(1))
+                .andExpect(jsonPath("$.guests[0].name").value("New guest"))
+                .andExpect(jsonPath("$.guests[0].imageUrl").isNotEmpty());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_types WHERE id = ?", Integer.class, removedId)).isZero();
+    }
+
+    @Test
+    void shouldRejectForeignOrDuplicateChildIdsAndUnsafeInventoryChanges() throws Exception {
+        int eventId = createEventId();
+        int otherId = createEventId();
+        var body = updateRequest(eventId);
+        var foreign = updateRequest(otherId);
+        int ticketId = ((Number) firstTicket(body).get("id")).intValue();
+        firstTicket(body).put("id", firstTicket(foreign).get("id"));
+        update(eventId, body, Map.of()).andExpect(status().isBadRequest());
+        firstTicket(body).put("id", ticketId);
+        ticketInputs(body).get(1).put("id", ticketId);
+        update(eventId, body, Map.of()).andExpect(status().isBadRequest());
+        body = updateRequest(eventId);
+        jdbc.update("UPDATE ticket_types SET remaining_quantity = 50, reserved_quantity = 5 WHERE id = ?", ticketId);
+        firstTicket(body).put("quantity", 9);
+        update(eventId, body, Map.of()).andExpect(status().isConflict());
+        ticketInputs(body).removeFirst();
+        update(eventId, body, Map.of()).andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("SELECT remaining_quantity FROM ticket_types WHERE id = ?", Integer.class, ticketId)).isEqualTo(50);
+    }
+
+    @Test
+    void shouldRequestCancellationAndBlockFurtherChangesWhileAwaitingAdmin() throws Exception {
+        createAdmin("ACTIVE");
+        int eventId = createEventId();
+        var body = updateRequest(eventId);
+        mvc.perform(post("/api/events/{eventId}/cancel", eventId).cookie(access).header("X-CSRF-Protection", "1")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"  Venue unavailable  \"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PENDING_CANCELLATION"))
+                .andExpect(jsonPath("$.cancelReason").value("Venue unavailable"))
+                .andExpect(jsonPath("$.canceledAt").isEmpty()).andExpect(jsonPath("$.canEdit").value(false))
+                .andExpect(jsonPath("$.canCancel").value(false))
+                .andExpect(jsonPath("$.ticketTypes[0].status").value("INACTIVE"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications WHERE type = 'EVENT_PENDING_CANCELLATION' AND users_id = ?",
+                Integer.class, admin.getId())).isEqualTo(1);
+        update(eventId, body, Map.of()).andExpect(status().isConflict());
+        mvc.perform(post("/api/events/{eventId}/cancel", eventId).cookie(access).header("X-CSRF-Protection", "1")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Retry\"}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void shouldRemoveOptionalImagesWithoutUploading() throws Exception {
+        var files = validImages();
+        files.put("imageZone", pngImage("imageZone"));
+        files.put("guestImage0", pngImage("guestImage0"));
+        int eventId = json.readTree(createWithImages(validRequest(), files).andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString()).get("id").asInt();
+        var body = updateRequest(eventId);
+        body.put("removeImageZone", true);
+        firstGuest(body).put("removeImage", true);
+        org.mockito.Mockito.clearInvocations(images);
+        update(eventId, body, Map.of()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.imageZoneUrl").isEmpty()).andExpect(jsonPath("$.guests[0].imageUrl").isEmpty());
+        verify(images, never()).upload(any(), anyString());
+    }
+
+    @Test
+    void shouldRollbackUpdatesAndCleanNewUploadsIfReplacingAnImageFails() throws Exception {
+        int eventId = createEventId();
+        var body = updateRequest(eventId);
+        String originalBanner = (String) body.get("bannerImageUrl");
+        body.put("name", "Should roll back");
+        body.put("guests", List.of());
+        List<String> attempted = new ArrayList<>();
+        doAnswer(invocation -> {
+            attempted.add(invocation.getArgument(1));
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_GATEWAY, "Upload failed");
+        }).when(images).upload(any(), anyString());
+        update(eventId, body, Map.of("bannerImage", pngImage("bannerImage"))).andExpect(status().isBadGateway());
+        mvc.perform(get("/api/events/{eventId}", eventId).cookie(access)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Organizer test event"))
+                .andExpect(jsonPath("$.bannerImageUrl").value(originalBanner))
+                .andExpect(jsonPath("$.guests.length()").value(1));
+        assertThat(attempted).hasSize(1);
+        verify(images).delete(attempted.getFirst());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"CUSTOMER", "ADMIN", "STAFF"})
+    void shouldDenyNonOrganizersAllManagementEndpoints(String role) throws Exception {
+        int eventId = createEventId();
+        var body = updateRequest(eventId);
+        organizer.setRole(Role.valueOf(role));
+        users.saveAndFlush(organizer);
+        mvc.perform(get("/api/events/mine").cookie(access)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/events/{eventId}", eventId).cookie(access)).andExpect(status().isForbidden());
+        update(eventId, body, Map.of()).andExpect(status().isForbidden());
+        mvc.perform(post("/api/events/{eventId}/cancel", eventId).cookie(access).header("X-CSRF-Protection", "1")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Test\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void shouldValidateCancellationReasonAndCsrf() throws Exception {
+        int eventId = createEventId();
+        mvc.perform(post("/api/events/{eventId}/cancel", eventId).cookie(access)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Test\"}"))
+                .andExpect(status().isForbidden());
+        for (String reason : List.of("  ", "x".repeat(256))) {
+            mvc.perform(post("/api/events/{eventId}/cancel", eventId).cookie(access).header("X-CSRF-Protection", "1")
+                    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(Map.of("reason", reason))))
+                    .andExpect(status().isBadRequest());
+        }
+        assertThat(jdbc.queryForObject("SELECT status FROM events WHERE id = ?", String.class, eventId)).isEqualTo("PENDING_APPROVAL");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"COMPLETED", "CANCELED"})
+    void shouldPreventEditingAndCancelingTerminalEvents(String eventStatus) throws Exception {
+        int eventId = createEventId();
+        var body = updateRequest(eventId);
+        jdbc.update("UPDATE events SET status = ? WHERE id = ?", eventStatus, eventId);
+        mvc.perform(get("/api/events/{eventId}", eventId).cookie(access)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.canEdit").value(false)).andExpect(jsonPath("$.canCancel").value(false));
+        update(eventId, body, Map.of()).andExpect(status().isConflict());
+        mvc.perform(post("/api/events/{eventId}/cancel", eventId).cookie(access).header("X-CSRF-Protection", "1")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Test\"}"))
+                .andExpect(status().isConflict());
+    }
+
+    private int createEventId() throws Exception {
+        return json.readTree(create(validRequest()).andExpect(status().isCreated()).andReturn()
+                .getResponse().getContentAsString()).get("id").asInt();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> updateRequest(int eventId) throws Exception {
+        return json.readValue(mvc.perform(get("/api/events/{eventId}", eventId).cookie(access))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), Map.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> ticketInputs(Map<String, Object> body) {
+        return (List<Map<String, Object>>) body.get("ticketTypes");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> firstGuest(Map<String, Object> body) {
+        return ((List<Map<String, Object>>) body.get("guests")).getFirst();
+    }
+
+    private ResultActions update(int eventId, Map<String, Object> body, Map<String, MockMultipartFile> files) throws Exception {
+        var request = multipart(org.springframework.http.HttpMethod.PUT, "/api/events/{eventId}", eventId)
+                .file(new MockMultipartFile("event", "event.json", "application/json", json.writeValueAsBytes(body)));
+        files.values().forEach(request::file);
+        return mvc.perform(request.cookie(access).header("X-CSRF-Protection", "1"));
     }
 
     private void createAdmin(String status) {

@@ -1,7 +1,9 @@
 package com.eventhub.backend.service;
 
 import com.eventhub.backend.dto.request.CreateEventRequest;
+import com.eventhub.backend.dto.request.UpdateEventRequest;
 import com.eventhub.backend.dto.response.EventResponse;
+import com.eventhub.backend.dto.response.EventListResponse;
 import com.eventhub.backend.dto.response.CategoryResponse;
 import com.eventhub.backend.entity.Event;
 import com.eventhub.backend.entity.EventGuest;
@@ -11,6 +13,7 @@ import com.eventhub.backend.entity.Venue;
 import com.eventhub.backend.enums.EventStatus;
 import com.eventhub.backend.enums.Role;
 import com.eventhub.backend.repository.CategoryRepository;
+import com.eventhub.backend.repository.BookingItemRepository;
 import com.eventhub.backend.repository.EventGuestRepository;
 import com.eventhub.backend.repository.EventRepository;
 import com.eventhub.backend.repository.NotificationRepository;
@@ -30,6 +33,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,6 +55,188 @@ public class EventService {
     private final UserRepository users;
     private final Clock clock;
     private final EventImageService images;
+    private final BookingItemRepository bookingItems;
+
+    @Transactional(readOnly = true)
+    public EventListResponse listEvents(Integer organizerId, int page, int size, String search, EventStatus status) {
+        requireOrganizer(organizerId);
+        if (page < 0 || size < 1 || size > 50 || search.length() > 255) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid pagination or search");
+        }
+        String pattern = "%" + search.strip().toLowerCase(java.util.Locale.ROOT)
+                .replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
+        var result = events.findOrganizerEvents(organizerId, status, pattern,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")));
+        Map<EventStatus, Long> counts = new java.util.EnumMap<>(EventStatus.class);
+        for (EventStatus item : EventStatus.values()) counts.put(item, 0L);
+        events.countOrganizerStatuses(organizerId).forEach(item -> counts.put(item.getStatus(), item.getTotal()));
+        var now = LocalDateTime.now(clock);
+        return new EventListResponse(result.map(event -> EventListResponse.EventSummaryResponse.from(event, now))
+                .getContent(), result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages(), counts);
+    }
+
+    @Transactional(readOnly = true)
+    public EventResponse getEvent(Integer organizerId, Integer eventId) {
+        requireOrganizer(organizerId);
+        var event = events.findByIdAndOrganizerId(eventId, organizerId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Event not found"));
+        return EventResponse.from(event, ticketTypes.findByEventIdOrderByIdAsc(eventId),
+                guests.findByEventIdOrderByIdAsc(eventId), LocalDateTime.now(clock));
+    }
+
+    private com.eventhub.backend.entity.User requireOrganizer(Integer organizerId) {
+        var organizer = users.findById(organizerId)
+                .orElseThrow(() -> new AccessDeniedException("Organizer account is unavailable"));
+        if (!organizer.isActive() || organizer.getRole() != Role.ORGANIZER) {
+            throw new AccessDeniedException("Only active organizers can manage events");
+        }
+        return organizer;
+    }
+
+    private Event ownedForUpdate(Integer organizerId, Integer eventId) {
+        requireOrganizer(organizerId);
+        return events.findOwnedForUpdate(eventId, organizerId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Event not found"));
+    }
+
+    @Transactional
+    public EventResponse cancelEvent(Integer organizerId, Integer eventId, String reason) {
+        Event event = ownedForUpdate(organizerId, eventId);
+        if (!EventResponse.canCancel(event, LocalDateTime.now(clock))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Event cannot be canceled in its current state");
+        }
+        event.setCancelReason(reason.strip());
+        event.setStatus(EventStatus.PENDING_CANCELLATION);
+        var savedTickets = ticketTypes.findForUpdate(eventId);
+        savedTickets.forEach(ticket -> ticket.setStatus("INACTIVE"));
+        notifyAdmin(event, "Có yêu cầu hủy sự kiện", "EVENT_PENDING_CANCELLATION", "\" vừa được gửi yêu cầu hủy.");
+        events.flush();
+        return EventResponse.from(event, savedTickets, guests.findByEventIdOrderByIdAsc(eventId), LocalDateTime.now(clock));
+    }
+
+    @Transactional
+    public EventResponse updateEvent(Integer organizerId, Integer eventId, UpdateEventRequest request,
+            Map<String, MultipartFile> files) {
+        Event event = ownedForUpdate(organizerId, eventId);
+        if (!EventResponse.canEdit(event, LocalDateTime.now(clock))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only upcoming events awaiting approval or approved can be edited");
+        }
+        validateScheduleAndCapacity(request.toCreateRequest());
+        var category = categories.findById(request.categoryId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Category not found"));
+        var currentTickets = ticketTypes.findForUpdate(eventId);
+        var currentGuests = guests.findByEventIdOrderByIdAsc(eventId);
+        Map<Integer, TicketType> ticketById = new LinkedHashMap<>();
+        currentTickets.forEach(ticket -> ticketById.put(ticket.getId(), ticket));
+        Map<Integer, EventGuest> guestById = new LinkedHashMap<>();
+        currentGuests.forEach(guest -> guestById.put(guest.getId(), guest));
+        Set<Integer> keptTickets = new HashSet<>();
+        Set<Integer> keptGuests = new HashSet<>();
+        for (var input : request.ticketTypes()) {
+            if (input.id() != null) {
+                if (!ticketById.containsKey(input.id()) || !keptTickets.add(input.id())) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or duplicate ticket type ID");
+                }
+                var ticket = ticketById.get(input.id());
+                int allocated = ticket.getQuantity() - ticket.getRemainingQuantity();
+                if (input.quantity() < allocated) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "Ticket quantity is below sold and reserved quantity");
+                }
+            }
+        }
+        var removedTickets = currentTickets.stream().filter(ticket -> !keptTickets.contains(ticket.getId())).toList();
+        for (var ticket : removedTickets) {
+            if (ticket.getReservedQuantity() > 0 || !ticket.getQuantity().equals(ticket.getRemainingQuantity())
+                    || bookingItems.existsByTicketTypeId(ticket.getId())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Cannot delete a ticket type with bookings or reservations");
+            }
+        }
+        var guestInputs = request.guests() == null ? List.<UpdateEventRequest.GuestRequest>of() : request.guests();
+        for (var input : guestInputs) {
+            if (input.id() != null && (!guestById.containsKey(input.id()) || !keptGuests.add(input.id()))) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or duplicate guest ID");
+            }
+        }
+        Set<String> required = new HashSet<>();
+        Set<String> allowed = new HashSet<>(Set.of("bannerImage", "thumbnailImage", "imageZone"));
+        for (int index = 0; index < request.ticketTypes().size(); index++) {
+            allowed.add("ticketImage" + index);
+            if (request.ticketTypes().get(index).id() == null) required.add("ticketImage" + index);
+        }
+        for (int index = 0; index < guestInputs.size(); index++) {
+            allowed.add("guestImage" + index);
+            if (Boolean.TRUE.equals(guestInputs.get(index).removeImage()) && files.containsKey("guestImage" + index)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot replace and remove the same guest image");
+            }
+        }
+        if (Boolean.TRUE.equals(request.removeImageZone()) && files.containsKey("imageZone")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot replace and remove the same zone image");
+        }
+        var prepared = prepareImages(required, allowed, files);
+
+        // Venues may be shared: editing this event must not modify another event's location.
+        Venue venue = event.getVenue();
+        if (events.countByVenueId(venue.getId()) > 1) venue = new Venue();
+        venue.setCity(request.venue().city().strip());
+        venue.setAddress(request.venue().address().strip());
+        venue.setCapacity(request.venue().capacity());
+        event.setVenue(venues.save(venue));
+        event.setCategory(category);
+        event.setName(request.name().strip());
+        event.setDescription(request.description());
+        event.setStartTime(request.startTime());
+        event.setEndTime(request.endTime());
+        event.setStatus(EventStatus.PENDING_APPROVAL);
+        event.setReviewedBy(null);
+        event.setReviewedAt(null);
+        event.setRejectReason(null);
+        if (Boolean.TRUE.equals(request.removeImageZone())) event.setImageZoneUrl(null);
+        ticketTypes.deleteAll(removedTickets);
+        List<TicketType> savedTickets = new ArrayList<>();
+        for (var input : request.ticketTypes()) {
+            var ticket = input.id() == null ? new TicketType() : ticketById.get(input.id());
+            int allocated = input.id() == null ? 0 : ticket.getQuantity() - ticket.getRemainingQuantity();
+            ticket.setEvent(event);
+            ticket.setName(input.name().strip());
+            ticket.setDescription(input.description());
+            ticket.setPrice(input.price());
+            ticket.setQuantity(input.quantity());
+            ticket.setRemainingQuantity(input.quantity() - allocated);
+            ticket.setSaleStartTime(input.saleStartTime());
+            ticket.setSaleEndTime(input.saleEndTime());
+            ticket.setStatus("INACTIVE");
+            if (input.id() == null) ticket.setImageUrl("");
+            savedTickets.add(ticket);
+        }
+        ticketTypes.saveAll(savedTickets);
+        guests.deleteAll(currentGuests.stream().filter(guest -> !keptGuests.contains(guest.getId())).toList());
+        List<EventGuest> savedGuests = new ArrayList<>();
+        for (var input : guestInputs) {
+            var guest = input.id() == null ? new EventGuest() : guestById.get(input.id());
+            guest.setEvent(event);
+            guest.setName(input.name().strip());
+            guest.setRole(input.role().strip());
+            guest.setDescription(input.description());
+            if (Boolean.TRUE.equals(input.removeImage())) guest.setImageUrl(null);
+            savedGuests.add(guest);
+        }
+        guests.saveAll(savedGuests);
+        notifyAdmin(event, "Có sự kiện cập nhật chờ duyệt", "EVENT_PENDING_APPROVAL",
+                "\" vừa được cập nhật và gửi lên chờ duyệt.");
+        events.flush();
+        var urls = uploadImages(prepared);
+        if (urls.containsKey("bannerImage")) event.setBannerImageUrl(urls.get("bannerImage"));
+        if (urls.containsKey("thumbnailImage")) event.setThumbnailImageUrl(urls.get("thumbnailImage"));
+        if (urls.containsKey("imageZone")) event.setImageZoneUrl(urls.get("imageZone"));
+        for (int index = 0; index < savedTickets.size(); index++) {
+            if (urls.containsKey("ticketImage" + index)) savedTickets.get(index).setImageUrl(urls.get("ticketImage" + index));
+        }
+        for (int index = 0; index < savedGuests.size(); index++) {
+            if (urls.containsKey("guestImage" + index)) savedGuests.get(index).setImageUrl(urls.get("guestImage" + index));
+        }
+        events.flush();
+        return EventResponse.from(event, savedTickets, savedGuests, LocalDateTime.now(clock));
+    }
 
     @Transactional(readOnly = true)
     public List<CategoryResponse> getCategories() {
@@ -61,11 +247,7 @@ public class EventService {
 
     @Transactional
     public EventResponse createEvent(Integer organizerId, CreateEventRequest request, Map<String, MultipartFile> files) {
-        var organizer = users.findById(organizerId)
-                .orElseThrow(() -> new AccessDeniedException("Organizer account is unavailable"));
-        if (!organizer.isActive() || organizer.getRole() != Role.ORGANIZER) {
-            throw new AccessDeniedException("Only active organizers can create events");
-        }
+        var organizer = requireOrganizer(organizerId);
         validateScheduleAndCapacity(request);
         var category = categories.findById(request.categoryId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Category not found"));
@@ -131,7 +313,7 @@ public class EventService {
             savedGuests.get(index).setImageUrl(urls.get("guestImage" + index));
         }
         events.flush();
-        return EventResponse.from(event, savedTicketTypes, savedGuests);
+        return EventResponse.from(event, savedTicketTypes, savedGuests, LocalDateTime.now(clock));
     }
 
     private Map<String, EventImageService.PreparedImage> prepareImages(CreateEventRequest request,
@@ -146,6 +328,11 @@ public class EventService {
         if (request.guests() != null) {
             for (int index = 0; index < request.guests().size(); index++) allowed.add("guestImage" + index);
         }
+        return prepareImages(required, allowed, files);
+    }
+
+    private Map<String, EventImageService.PreparedImage> prepareImages(Set<String> required, Set<String> allowed,
+            Map<String, MultipartFile> files) {
         if (!files.keySet().containsAll(required) || !allowed.containsAll(files.keySet())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing required images or unexpected image fields");
         }
@@ -156,6 +343,7 @@ public class EventService {
     }
 
     private Map<String, String> uploadImages(Map<String, EventImageService.PreparedImage> prepared) {
+        if (prepared.isEmpty()) return Map.of();
         images.verifyConfiguration();
         List<String> attemptedImageIds = new ArrayList<>();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -184,9 +372,12 @@ public class EventService {
     }
 
     private void notifyAdmin(Event event) {
+        notifyAdmin(event, "Có sự kiện mới chờ duyệt", "EVENT_PENDING_APPROVAL", "\" vừa được gửi lên chờ duyệt.");
+    }
+
+    private void notifyAdmin(Event event, String title, String type, String suffix) {
         users.findFirstByRoleAndStatusOrderByIdAsc(Role.ADMIN, "ACTIVE").ifPresent(admin -> {
             String prefix = "Sự kiện \"";
-            String suffix = "\" vừa được gửi lên chờ duyệt.";
             String eventName = event.getName();
             int maxNameLength = 255 - prefix.length() - suffix.length();
             // Keep the message within the existing VARCHAR(255), including long event names.
@@ -195,9 +386,9 @@ public class EventService {
             }
             Notification notification = new Notification();
             notification.setUser(admin);
-            notification.setTitle("Có sự kiện mới chờ duyệt");
+            notification.setTitle(title);
             notification.setContent(prefix + eventName + suffix);
-            notification.setType("EVENT_PENDING_APPROVAL");
+            notification.setType(type);
             notification.setRead(false);
             notifications.save(notification);
         });
