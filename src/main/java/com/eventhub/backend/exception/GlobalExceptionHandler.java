@@ -58,6 +58,11 @@ public class GlobalExceptionHandler implements AuthenticationEntryPoint, AccessD
         return error(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", "Invalid request", request);
     }
 
+    @ExceptionHandler(EmailAlreadyExistsException.class)
+    ResponseEntity<ApiError> handleEmailAlreadyExists(EmailAlreadyExistsException exception, HttpServletRequest request) {
+        return error(HttpStatus.CONFLICT, "EMAIL_ALREADY_EXISTS", exception.getMessage(), request);
+    }
+
     @ExceptionHandler(DataIntegrityViolationException.class)
     ResponseEntity<ApiError> handleConflict(HttpServletRequest request) {
         return error(HttpStatus.CONFLICT, "DATA_CONFLICT", "Data conflicts with an existing record", request);
