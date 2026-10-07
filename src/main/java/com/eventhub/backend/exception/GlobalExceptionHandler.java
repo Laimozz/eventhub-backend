@@ -20,6 +20,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import tools.jackson.databind.ObjectMapper;
 
 @RestControllerAdvice
@@ -60,6 +61,11 @@ public class GlobalExceptionHandler implements AuthenticationEntryPoint, AccessD
     @ExceptionHandler(DataIntegrityViolationException.class)
     ResponseEntity<ApiError> handleConflict(HttpServletRequest request) {
         return error(HttpStatus.CONFLICT, "DATA_CONFLICT", "Data conflicts with an existing record", request);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ResponseEntity<ApiError> handleOversizedImage(HttpServletRequest request) {
+        return error(HttpStatus.PAYLOAD_TOO_LARGE, "IMAGE_TOO_LARGE", "Images must not exceed 5 MB each or 50 MB per request", request);
     }
 
     private ResponseEntity<ApiError> error(HttpStatus status, String code, String message,

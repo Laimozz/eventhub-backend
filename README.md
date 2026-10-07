@@ -13,7 +13,7 @@ Backend của dự án EventHub, sử dụng Java 21, Spring Boot và Maven. REA
 | Kiểm thử | Spring Boot Test và JUnit |
 | Database | PostgreSQL 16+, Spring Data JPA, Flyway |
 
-Hiện tại dự án có 20 entity/repository, migration Flyway và kiểm thử tích hợp PostgreSQL. API chỉ gồm đăng ký, đăng nhập, refresh và đăng xuất bằng JWT qua HttpOnly Cookie. Xem [tài liệu API](api-endpoints.md) để tích hợp cookie và header bảo vệ CSRF.
+Hiện tại dự án có 20 entity/repository, migration Flyway và kiểm thử tích hợp PostgreSQL. API gồm đăng ký, đăng nhập, refresh, đăng xuất bằng JWT qua HttpOnly Cookie và tạo sự kiện dành cho Organizer. Xem [tài liệu API](api-endpoints.md) để tích hợp cookie, header bảo vệ CSRF và request tạo sự kiện.
 
 ## 2. Chuẩn bị và chạy dự án
 
@@ -120,7 +120,7 @@ Frontend cần gửi credentials và header `X-CSRF-Protection: 1` khi gọi POS
 
 - Entity: `src/main/java/com/eventhub/backend/entity/`; repository: `src/main/java/com/eventhub/backend/repository/`.
 - Mỗi entity là class độc lập, khai báo trực tiếp `id` và các trường thời gian tương ứng với bảng. Các callback `@PrePersist`/`@PreUpdate` nằm ngay trong entity; không dùng lớp cha chung.
-- Migration: `src/main/resources/db/migration/`: V1 schema, V2 thêm xác thực/refresh tokens với `revoked BOOLEAN NOT NULL DEFAULT FALSE` và cho phép role STAFF. V2/V3 cũ chưa áp dụng nên được gộp vào V2; không còn V3.
+- Migration: `src/main/resources/db/migration/`: V1 schema, V2 thêm xác thực/refresh tokens với `revoked BOOLEAN NOT NULL DEFAULT FALSE` và cho phép role STAFF; V3 giới hạn `events.status` theo sáu giá trị trong `EventStatus`. V3 kiểm tra dữ liệu hiện có, không tự đổi các status cũ ngoài danh sách.
 - Hibernate dùng `ddl-auto=validate`: chỉ kiểm tra mapping, Flyway chịu trách nhiệm thay đổi schema. Cấu hình này theo [hướng dẫn Spring Boot](https://docs.spring.io/spring-boot/how-to/data-initialization.html).
 - Sau khi V1 đã chạy, mọi thay đổi schema cần file mới như `V2__add_event_field.sql`; không sửa migration đã áp dụng. Không bật tự động baseline cho database đã có bảng.
 - Các quan hệ dùng lazy loading, không cascade xóa. Khóa ngoại ngăn xóa bản ghi còn được tham chiếu; PostgreSQL có index trên các cột khóa ngoại.
@@ -130,18 +130,35 @@ Frontend cần gửi credentials và header `X-CSRF-Protection: 1` khi gọi POS
 - `int(10)` → PostgreSQL `INTEGER`/Java `Integer`, ID tự tăng bằng identity. Tên bảng/cột dùng chữ thường, gồm `categories`/`categories_id`.
 - Tiền dùng `NUMERIC(19,2)`/`BigDecimal` thay cho `double`. Schema chưa có cột tiền tệ; tầng nghiệp vụ cần thống nhất đơn vị khi triển khai thanh toán.
 - `datetime` → `TIMESTAMP(6) WITHOUT TIME ZONE`/`LocalDateTime`, quy ước giá trị là UTC; giao diện cần chuyển múi giờ khi hiển thị.
+- `Event`, `TicketType`, `EventGuest`, `Notification` dùng `@JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)` để truyền thời gian trực tiếp qua JDBC, giữ nguyên giá trị UTC khi JVM chạy ở múi giờ khác. Các bảng này không tự chuyển đổi dữ liệu thời gian đã lưu trước thay đổi. Xem [cơ chế ánh xạ thời gian của Hibernate](https://docs.hibernate.org/orm/7.4/javadocs/org/hibernate/type/SqlTypes.html#LOCAL_DATE_TIME).
 - `created_at` và `updated_at` (ở các bảng có cột này) được JPA tự gán, luôn có giá trị; SQL có default khi insert. Khi update bằng SQL trực tiếp/bulk query, phải tự cập nhật `updated_at`.
 - `is_read` dùng Boolean, mặc định false; `reserved_quantity` và `retry_count` mặc định 0. Các số dư ví mặc định 0.
 - `reviewed_by`, `checked_in_at`, `refunded_at`, `processed_by`, `processed_at`, `completed_at` và `transaction_code` của rút tiền/chi trả cho phép NULL khi thao tác chưa xảy ra.
 - Unique theo cặp `event_staffs(events_id, staff_id)` và `booking_items(bookings_id, ticket_types_id)`: một sự kiện có nhiều nhân viên, một đơn có nhiều loại vé. Mỗi organizer có tối đa một ví, mỗi payment có tối đa một refund.
 - Có CHECK cho tiền/số lượng không âm, số lượng vé đặt mua dương, tổng vé giữ chỗ và vé còn lại không vượt số vé, thời gian kết thúc không trước thời gian bắt đầu.
-- `users.role` ánh xạ enum Role, mỗi user chỉ có một role ADMIN/CUSTOMER/ORGANIZER/STAFF. Khi được phân công, nghiệp vụ đổi role CUSTOMER thành STAFF trong database. Auth chỉ cho phép user có `status=ACTIVE`, đọc trực tiếp role hiện tại và không truy vấn phân công trong `event_staffs`; `UserResponse` và JWT chỉ có `role`, không có tập `roles`. Chưa có API quản lý phân công. Các status/type nghiệp vụ khác vẫn giữ dạng chuỗi.
+- `users.role` ánh xạ enum Role, mỗi user chỉ có một role ADMIN/CUSTOMER/ORGANIZER/STAFF. Khi được phân công, nghiệp vụ đổi role CUSTOMER thành STAFF trong database. Auth chỉ cho phép user có `status=ACTIVE`, đọc trực tiếp role hiện tại và không truy vấn phân công trong `event_staffs`; `UserResponse` và JWT chỉ có `role`, không có tập `roles`. Chưa có API quản lý phân công. `events.status` ánh xạ `EventStatus`; các status/type nghiệp vụ khác vẫn giữ dạng chuỗi.
+
+### Tạo sự kiện
+
+`POST /api/events` dành cho `ORGANIZER`, lưu địa điểm mới, sự kiện, loại vé và khách mời (nếu có) trong cùng transaction. Danh mục được chọn bằng `categoryId` đã tồn tại. Sự kiện mới luôn là `PENDING_APPROVAL` để Admin xét duyệt sau; chưa triển khai API duyệt. Hệ thống có một Admin: khi có Admin ACTIVE, tạo một thông báo chưa đọc `EVENT_PENDING_APPROVAL` trong cùng transaction; nếu chưa có Admin ACTIVE, sự kiện vẫn nằm trong hàng chờ duyệt. Thông báo chỉ hiển thị nội dung, dùng bảng hiện tại với `users_id`. Loại vé khởi tạo `INACTIVE`, số vé giữ chỗ bằng 0 và số vé còn lại bằng số lượng. Chi tiết request, validation và sáu trạng thái nằm trong [tài liệu API](api-endpoints.md#7-tạo-sự-kiện).
+
+Form frontend dùng `GET /api/categories` để lấy danh mục trong DB. Ảnh được xem trước tại trình duyệt, chưa upload khi chọn file. Khi gửi duyệt, frontend gọi API duy nhất `POST /api/events` trong `EventController` với multipart gồm JSON sự kiện và các file ảnh (mỗi file PNG/JPEG tối đa 5 MB, 20 megapixel; tổng request tối đa 50 MB). Request JSON chỉ chứa thông tin sự kiện, vé và khách mời; không nhận URL ảnh từ client, không hỗ trợ body JSON riêng. Backend kiểm tra toàn bộ dữ liệu/file, lưu và flush hồ sơ trong transaction trước khi gọi [Cloudinary Upload API](https://cloudinary.com/documentation/image_upload_api_reference) bằng Spring RestClient hiện có. Sau khi upload, cập nhật URL HTTPS (`secure_url`) vào các cột ảnh hiện có rồi commit; response trả hồ sơ và URL. `EventService` xử lý tạo hồ sơ và transaction, `EventImageService` xử lý ảnh và Cloudinary. Không có endpoint upload ảnh riêng, thư mục lưu ảnh hoặc API đọc ảnh local.
+
+Cấu hình ba biến môi trường **trên backend** (lấy từ API Keys trong Cloudinary Console):
+
+| Biến môi trường | Giá trị |
+| --- | --- |
+| `CLOUDINARY_CLOUD_NAME` | Cloud name của môi trường Cloudinary |
+| `CLOUDINARY_API_KEY` | API key |
+| `CLOUDINARY_API_SECRET` | API secret; không đặt trong frontend hoặc commit vào Git |
+
+Hoặc đặt `app.cloudinary.cloud-name`, `app.cloudinary.api-key`, `app.cloudinary.api-secret` trong `application-local.properties` đã được Git bỏ qua. Khởi động lại backend sau khi cấu hình. Thiếu cấu hình thì tạo sự kiện multipart trả `503` và rollback; các API khác vẫn hoạt động. Không cần unsigned upload preset. Ảnh upload vào `eventhub/events` với ID UUID riêng cho mỗi lần tạo. Nếu upload hoặc lưu DB thất bại, transaction rollback và backend gọi destroy cho các ID của lần tạo đó. Cloudinary và PostgreSQL không có transaction chung: nếu destroy cũng thất bại, backend ghi log để xử lý ảnh còn lại, không che lỗi tạo sự kiện. Hủy bản nháp chưa gửi không tạo ảnh trên Cloudinary. Chi tiết trong [tài liệu API](api-endpoints.md#9-ảnh-dùng-trong-form-tạo-sự-kiện).
 
 ### Kiểm thử database
 
 `mvnw test` và `mvnw clean verify` mặc định dùng Testcontainers với `postgres:16-alpine`. PostgreSQL test tách biệt với `eventhub_db`, tự dọn khi Spring context đóng; các test dữ liệu chạy trong transaction và rollback. Lần đầu cần mạng để tải image.
 
-Bộ test chạy Flyway, Hibernate validate, ràng buộc dữ liệu và 4 luồng auth qua MockMvc trên PostgreSQL thật. Kiểm tra đăng ký không tạo phiên, hash, thời hạn token/cookie theo cấu hình, role STAFF lấy từ database, header CSRF/CORS, token sai/hết hạn/rotation, refresh đồng thời, đăng xuất, user bị khóa và nâng V1 lên V2 với cột boolean `revoked`. Khóa JWT test riêng được nạp tự động. Dữ liệu fixture auth được dọn sau mỗi test; các test database dùng transaction rollback hoặc schema tạm riêng.
+Bộ test chạy Flyway, Hibernate validate, ràng buộc dữ liệu và 4 luồng auth qua MockMvc trên PostgreSQL thật. Kiểm tra đăng ký không tạo phiên, hash, thời hạn token/cookie theo cấu hình, role STAFF lấy từ database, header CSRF/CORS, token sai/hết hạn/rotation, refresh đồng thời, đăng xuất, user bị khóa và nâng V1 lên migration mới nhất. Test tạo sự kiện kiểm tra quyền Organizer, trạng thái chờ duyệt, dữ liệu liên quan, validation thời gian/sức chứa và rollback khi lưu khách mời thất bại. Khóa JWT test riêng được nạp tự động. Dữ liệu fixture auth/sự kiện được dọn sau mỗi test; các test database dùng transaction rollback hoặc schema tạm riêng.
 
 Nếu không dùng Docker, tạo **database test riêng, trống** và cung cấp thông tin rõ ràng:
 

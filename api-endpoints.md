@@ -2,7 +2,7 @@
 
 Base URL local: `http://localhost:8080`.
 
-Tài liệu mô tả bốn endpoint đang được triển khai trong `AuthController`.
+Tài liệu mô tả các endpoint đang được triển khai trong `AuthController` và `EventController`.
 
 ### Headers và cookie
 
@@ -20,6 +20,7 @@ X-CSRF-Protection: 1
 | UC02 | Đăng nhập | `POST /api/auth/login` | Public | `200 OK` |
 | Hỗ trợ UC02 | Cấp lại token | `POST /api/auth/refresh` | Required — refresh token | `200 OK` |
 | UC03 | Đăng xuất | `POST /api/auth/logout` | Public — cookie tùy chọn | `204 No Content` |
+| UC19 | Tạo sự kiện | `POST /api/events` | Required — access token, role `ORGANIZER` | `201 Created` |
 
 ## 3. Đăng ký tài khoản
 
@@ -250,4 +251,115 @@ Gọi lặp lại vẫn trả `204` nếu header CSRF hợp lệ. Nếu không g
   "errors": {}
 }
 ```
+
+## 7. Tạo sự kiện
+
+`POST /api/events` — yêu cầu cookie `access_token` hợp lệ của tài khoản `ORGANIZER` đang `ACTIVE`, header `X-CSRF-Protection: 1` và `multipart/form-data`. Frontend gửi một `FormData` gồm part `event` (JSON, Content-Type `application/json`) và các file ảnh theo mục 9, dùng cookie với `credentials: "include"` hoặc Axios `withCredentials: true`. Để trình duyệt tự đặt Content-Type/boundary. API không nhận body JSON riêng hoặc URL ảnh có sẵn.
+
+Theo UC19, frontend gom dữ liệu các bước của form và gửi một request khi Submit. Backend tạo `venues`, `events`, `ticket_types`, `event_guests` trong cùng transaction; nếu một bước thất bại thì rollback toàn bộ. `categoryId` tham chiếu danh mục có sẵn, không tạo hoặc sửa danh mục.
+
+### JSON trong part `event`
+
+| Field | Bắt buộc | Quy tắc |
+| --- | --- | --- |
+| `name` | Có | Không trống, tối đa 255 ký tự; trim khi lưu. |
+| `description` | Không | Tối đa 255 ký tự theo schema hiện tại. |
+| `startTime`, `endTime` | Có | ISO local datetime **theo UTC**, ví dụ `2030-10-20T12:00:00`. Bắt đầu phải ở tương lai; kết thúc phải sau bắt đầu. Frontend đổi giờ địa phương sang UTC trước khi gửi. |
+| `categoryId` | Có | Số nguyên dương, danh mục phải tồn tại. |
+| `venue` | Có | `city`, `address` không trống, tối đa 255 ký tự; `capacity` là số nguyên dương. Tạo địa điểm mới cho sự kiện. |
+| `ticketTypes` | Có | Ít nhất một loại vé; không chứa phần tử null. Tổng `quantity` không vượt `venue.capacity`. |
+| `guests` | Không | Có thể bỏ qua, null hoặc `[]`; nếu có thì từng phần tử phải hợp lệ, không null. |
+
+Mỗi phần tử `ticketTypes` gồm:
+
+- `name`: bắt buộc, không trống, tối đa 255 ký tự; `description` tùy chọn, tối đa 255 ký tự. Ảnh vé gửi bằng part `ticketImage{index}` riêng, bắt buộc cho mỗi loại vé.
+- `price`: bắt buộc, không âm (0 cho vé miễn phí), tối đa 17 chữ số nguyên và 2 chữ số thập phân, dùng VND theo use case của dự án.
+- `quantity`: số nguyên dương.
+- `saleStartTime`, `saleEndTime`: bắt buộc, cùng định dạng UTC với sự kiện. Kết thúc bán không trước bắt đầu bán; cả hai phải **trước** `startTime` của sự kiện.
+
+Mỗi phần tử `guests` gồm `name`, `role` bắt buộc, không trống, tối đa 50 ký tự; `description` tùy chọn, tối đa 255 ký tự. Ảnh khách mời tùy chọn, gửi bằng part `guestImage{index}` riêng.
+
+```json
+{
+  "name": "Đêm nhạc Acoustic Thu",
+  "description": "Chương trình âm nhạc acoustic",
+  "startTime": "2030-10-20T12:00:00",
+  "endTime": "2030-10-20T15:00:00",
+  "categoryId": 1,
+  "venue": {
+    "city": "Hà Nội",
+    "address": "123 Nguyễn Trãi, Thanh Xuân",
+    "capacity": 500
+  },
+  "ticketTypes": [
+    {
+      "name": "Vé VIP",
+      "description": "Khu vực gần sân khấu",
+      "price": 1500000,
+      "quantity": 100,
+      "saleStartTime": "2030-10-01T01:00:00",
+      "saleEndTime": "2030-10-19T16:59:00"
+    }
+  ],
+  "guests": [
+    {
+      "name": "Nguyễn Văn A",
+      "role": "Ca sĩ chính",
+      "description": "Ca sĩ acoustic"
+    }
+  ]
+}
+```
+
+### Response và trạng thái
+
+Thành công trả `201 Created` với `EventResponse`: thông tin sự kiện như request, thêm `id`, `organizerId`, `status`, `createdAt` và URL Cloudinary `thumbnailImageUrl`, `bannerImageUrl`, `imageZoneUrl`; `venue`, từng loại vé và khách mời có `id` đã lưu. Loại vé trả thêm `imageUrl`, `reservedQuantity`, `remainingQuantity`, `status`; khách mời trả thêm `imageUrl`. Ảnh tùy chọn không gửi có URL null. `guests` luôn là một mảng, kể cả khi không có khách mời.
+
+Backend lấy Organizer từ phiên đăng nhập, tự gán `status = PENDING_APPROVAL`. Các trường duyệt/hủy giữ null. Loại vé có `reservedQuantity = 0`, `remainingQuantity = quantity`, `status = INACTIVE`. Client không điều khiển Organizer, trạng thái, người duyệt hoặc số lượng vé giữ chỗ/còn lại qua request này.
+
+| Giá trị `events.status` | Ý nghĩa |
+| --- | --- |
+| `PENDING_APPROVAL` | Chờ duyệt |
+| `APPROVED` | Đã duyệt |
+| `ONGOING` | Đang diễn ra |
+| `COMPLETED` | Đã kết thúc |
+| `PENDING_CANCELLATION` | Chờ hủy |
+| `CANCELED` | Đã hủy |
+
+Sự kiện chờ duyệt được lưu trong DB để chức năng Admin truy vấn sau. Sau khi lưu dữ liệu sự kiện, backend tìm Admin ACTIVE và tạo một bản ghi `notifications` trong cùng transaction: `users_id` là ID của Admin, `title = Có sự kiện mới chờ duyệt`, `type = EVENT_PENDING_APPROVAL`, `is_read = false`, nội dung chứa tên sự kiện. Tên dài được rút gọn trong thông báo để giữ nội dung trong giới hạn 255 ký tự của DB. Thông báo chỉ để hiển thị. Nếu chưa có Admin ACTIVE, sự kiện vẫn được tạo; nếu lưu thông báo thất bại, toàn bộ transaction rollback. Với giả định hệ thống có một Admin, truy vấn lấy một Admin ACTIVE theo ID tăng dần.
+
+API duyệt, chuyển trạng thái theo thời gian, hủy, xem/đánh dấu đã đọc thông báo và mở bán vé sẽ được triển khai ở các tính năng tương ứng.
+
+| HTTP status | Trường hợp |
+| --- | --- |
+| `400 Bad Request` | Thiếu/sai dữ liệu, thời gian không hợp lệ, tổng số vé vượt sức chứa. Lỗi annotation trả `VALIDATION_ERROR` và field cụ thể, kể cả field lồng nhau; lỗi nghiệp vụ trả `REQUEST_ERROR`. |
+| `401 Unauthorized` | Thiếu hoặc sai phiên, phiên hết hạn/thu hồi, tài khoản không ACTIVE. |
+| `403 Forbidden` | Role khác ORGANIZER hoặc thiếu header CSRF. |
+| `404 Not Found` | `categoryId` không tồn tại. |
+| `409 Conflict` | Vi phạm ràng buộc DB khi lưu; toàn bộ thao tác được rollback. |
+| `415 Unsupported Media Type` | Gửi body JSON riêng thay vì multipart hoặc sai Content-Type của part `event`. |
+
+## 8. Danh mục dùng trong form tạo sự kiện
+
+`GET /api/categories` yêu cầu phiên đăng nhập hợp lệ, trả danh sách danh mục hiện có sắp xếp theo tên. Mỗi phần tử gồm `id`, `name`, `description`; danh sách trống trả `[]`. API chỉ đọc dữ liệu để Organizer chọn `categoryId`, không tạo/sửa danh mục.
+
+## 9. Ảnh dùng trong form tạo sự kiện
+
+Frontend dùng `POST /api/events` trong `EventController` với multipart, yêu cầu phiên ORGANIZER và `X-CSRF-Protection: 1`. Không tự đặt Content-Type/boundary ở frontend. Các part:
+
+| Part | Nội dung |
+| --- | --- |
+| `event` | JSON `CreateEventRequest` (Content-Type `application/json`), chỉ gồm thông tin ở mục 7; không có trường URL ảnh. |
+| `bannerImage`, `thumbnailImage` | Hai file ảnh sự kiện bắt buộc. |
+| `imageZone` | File sơ đồ khu vực, tùy chọn. |
+| `ticketImage0`, `ticketImage1`, ... | File ảnh bắt buộc cho mỗi loại vé, chỉ số theo thứ tự `ticketTypes`. |
+| `guestImage0`, `guestImage1`, ... | File ảnh tùy chọn cho mỗi khách mời, chỉ số theo thứ tự `guests`. |
+
+Backend kiểm tra ảnh PNG/JPEG hợp lệ (mỗi file tối đa 5 MB và 20 megapixel; tổng request tối đa 50 MB), kiểm tra nghiệp vụ rồi lưu/flush hồ sơ trong transaction. Sau đó mới upload tới Cloudinary (`image/upload`, folder `eventhub/events`) và cập nhật URL trước khi commit. Không upload khi chọn ảnh, lưu nháp hoặc khi dữ liệu không hợp lệ. Không gửi API key/secret cho frontend.
+
+Thành công trả `201 Created` với `EventResponse` như mục 7, bao gồm các trường URL HTTPS do Cloudinary trả về. DB chỉ lưu URL; ảnh nằm trên Cloudinary. Chỉ có một API tạo sự kiện multipart, không có endpoint upload ảnh riêng. Thiếu ảnh bắt buộc hoặc gửi tên part ảnh không khớp dữ liệu vé/khách mời trả `400` trước khi upload.
+
+File sai/trống/vượt 20 megapixel trả `400`; multipart vượt giới hạn trả `413`; thiếu cấu hình Cloudinary trả `503`; lỗi Cloudinary/kết nối/response URL không hợp lệ trả `502` với thông báo chung, không lộ nội dung lỗi provider. Kết nối có timeout 5 giây, đọc response 30 giây và không tự retry upload.
+
+Cần cấu hình `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` trên backend theo README. Mỗi ảnh dùng public ID UUID riêng, không ghi đè ảnh cũ. Upload/lưu URL thất bại thì rollback toàn bộ DB và gọi Cloudinary destroy cho các ID đã thử upload (kể cả request timeout). Nếu destroy thất bại, ghi log ID để xử lý, giữ nguyên lỗi ban đầu; không thể đảm bảo atomicity giữa hai dịch vụ khi kết nối/provider gặp sự cố. Hủy bản nháp chưa gửi không tạo ảnh trên Cloudinary. Không lưu ảnh lâu dài trên ổ đĩa backend và không có API đọc ảnh local.
 

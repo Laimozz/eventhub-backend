@@ -1,6 +1,7 @@
 package com.eventhub.backend;
 
 import com.eventhub.backend.entity.*;
+import com.eventhub.backend.enums.EventStatus;
 import com.eventhub.backend.enums.Role;
 import com.eventhub.backend.repository.BookingRepository;
 import com.eventhub.backend.repository.UserRepository;
@@ -267,6 +268,19 @@ class DatabaseIntegrationTests {
 
     @Test
     @Transactional
+    void shouldPersistAllEventStatusesAndRejectUnknownStatus() {
+        Fixture fixture = createFixture();
+        for (EventStatus status : EventStatus.values()) {
+            jdbc.update("UPDATE events SET status = ? WHERE id = ?", status.name(), fixture.event().getId());
+            entityManager.clear();
+            assertThat(entityManager.find(Event.class, fixture.event().getId()).getStatus()).isEqualTo(status);
+        }
+        assertThatThrownBy(() -> jdbc.update("UPDATE events SET status = 'UNKNOWN' WHERE id = ?",
+                fixture.event().getId())).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @Transactional
     void shouldRejectDuplicateEmail() {
         User user = createUser();
         assertThatThrownBy(() -> jdbc.update("""
@@ -330,7 +344,7 @@ class DatabaseIntegrationTests {
     }
 
     @Test
-    void shouldUpgradeV1ToV2WithBooleanRevocationAndPersistedStaffRole() {
+    void shouldUpgradeV1ToLatestWithBooleanRevocationAndPersistedStaffRole() {
         String schema = "auth_migration_" + UUID.randomUUID().toString().replace("-", "");
         try {
             Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema).defaultSchema(schema)
@@ -339,8 +353,8 @@ class DatabaseIntegrationTests {
                     + "VALUES (1, 'migration@example.invalid', 'test-hash', 'CUSTOMER', 'ACTIVE')");
             Flyway upgraded = Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema)
                     .defaultSchema(schema).load();
-            assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(1);
-            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("2");
+            assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(2);
+            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("3");
             assertThat(upgraded.info().pending()).isEmpty();
             jdbc.update("UPDATE " + schema + ".users SET role = 'STAFF' WHERE id = 1");
             assertThat(jdbc.queryForObject("SELECT role FROM " + schema + ".users WHERE id = 1", String.class))
@@ -381,7 +395,7 @@ class DatabaseIntegrationTests {
         event.setBannerImageUrl("https://example.invalid/banner.jpg");
         event.setStartTime(LocalDateTime.of(2030, 1, 2, 10, 0));
         event.setEndTime(LocalDateTime.of(2030, 1, 2, 12, 0));
-        event.setStatus("TEST");
+        event.setStatus(EventStatus.PENDING_APPROVAL);
         persist(event);
         TicketType type = createTicketType(event);
         Booking booking = createBooking(user, event);
