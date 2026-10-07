@@ -13,7 +13,7 @@ Backend của dự án EventHub, sử dụng Java 21, Spring Boot và Maven. REA
 | Kiểm thử | Spring Boot Test và JUnit |
 | Database | PostgreSQL 16+, Spring Data JPA, Flyway |
 
-Hiện tại dự án có 20 entity/repository, migration Flyway và kiểm thử tích hợp PostgreSQL. API gồm đăng ký, đăng nhập, refresh, đăng xuất bằng JWT qua HttpOnly Cookie và tạo sự kiện dành cho Organizer. Xem [tài liệu API](api-endpoints.md) để tích hợp cookie, header bảo vệ CSRF và request tạo sự kiện.
+Hiện tại dự án có 20 entity/repository, migration Flyway và kiểm thử tích hợp PostgreSQL. API gồm đăng ký, đăng nhập, refresh, đăng xuất bằng JWT qua HttpOnly Cookie; Organizer tạo, xem danh sách/chi tiết, sửa và gửi yêu cầu hủy sự kiện. Xem [tài liệu API](api-endpoints.md) để tích hợp cookie, header bảo vệ CSRF và hợp đồng quản lý sự kiện.
 
 ## 2. Chuẩn bị và chạy dự án
 

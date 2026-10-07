@@ -328,7 +328,7 @@ Backend lấy Organizer từ phiên đăng nhập, tự gán `status = PENDING_A
 
 Sự kiện chờ duyệt được lưu trong DB để chức năng Admin truy vấn sau. Sau khi lưu dữ liệu sự kiện, backend tìm Admin ACTIVE và tạo một bản ghi `notifications` trong cùng transaction: `users_id` là ID của Admin, `title = Có sự kiện mới chờ duyệt`, `type = EVENT_PENDING_APPROVAL`, `is_read = false`, nội dung chứa tên sự kiện. Tên dài được rút gọn trong thông báo để giữ nội dung trong giới hạn 255 ký tự của DB. Thông báo chỉ để hiển thị. Nếu chưa có Admin ACTIVE, sự kiện vẫn được tạo; nếu lưu thông báo thất bại, toàn bộ transaction rollback. Với giả định hệ thống có một Admin, truy vấn lấy một Admin ACTIVE theo ID tăng dần.
 
-API duyệt, chuyển trạng thái theo thời gian, hủy, xem/đánh dấu đã đọc thông báo và mở bán vé sẽ được triển khai ở các tính năng tương ứng.
+API Organizer gửi yêu cầu hủy được mô tả ở mục 10. API Admin duyệt, chuyển trạng thái theo thời gian, xem/đánh dấu đã đọc thông báo và mở bán vé thuộc các tính năng tương ứng.
 
 | HTTP status | Trường hợp |
 | --- | --- |
@@ -362,4 +362,36 @@ Thành công trả `201 Created` với `EventResponse` như mục 7, bao gồm c
 File sai/trống/vượt 20 megapixel trả `400`; multipart vượt giới hạn trả `413`; thiếu cấu hình Cloudinary trả `503`; lỗi Cloudinary/kết nối/response URL không hợp lệ trả `502` với thông báo chung, không lộ nội dung lỗi provider. Kết nối có timeout 5 giây, đọc response 30 giây và không tự retry upload.
 
 Cần cấu hình `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` trên backend theo README. Mỗi ảnh dùng public ID UUID riêng, không ghi đè ảnh cũ. Upload/lưu URL thất bại thì rollback toàn bộ DB và gọi Cloudinary destroy cho các ID đã thử upload (kể cả request timeout). Nếu destroy thất bại, ghi log ID để xử lý, giữ nguyên lỗi ban đầu; không thể đảm bảo atomicity giữa hai dịch vụ khi kết nối/provider gặp sự cố. Hủy bản nháp chưa gửi không tạo ảnh trên Cloudinary. Không lưu ảnh lâu dài trên ổ đĩa backend và không có API đọc ảnh local.
+
+## 10. Organizer xem và quản lý sự kiện
+
+Các endpoint dưới đây chỉ dành cho ORGANIZER ACTIVE, lấy tài khoản từ cookie. Chỉ truy cập sự kiện của chính Organizer; ID không tồn tại hoặc thuộc tài khoản khác đều trả `404`. Request ghi dữ liệu cần `X-CSRF-Protection: 1`. Tất cả thời gian API là UTC không offset; FE nhập/hiển thị GMT+7.
+
+| Method và endpoint | Hành vi |
+| --- | --- |
+| `GET /api/events/mine` | Danh sách riêng của Organizer, tìm theo tên và lọc trạng thái, mới tạo trước. |
+| `GET /api/events/{eventId}` | Trả `EventResponse`, gồm địa điểm, danh mục, loại vé, khách mời và ảnh đã lưu. |
+| `PUT /api/events/{eventId}` | Cập nhật toàn bộ hồ sơ bằng multipart, gửi Admin duyệt lại. |
+| `POST /api/events/{eventId}/cancel` | Gửi yêu cầu hủy cho Admin bằng JSON `{ "reason": "Lý do hủy" }`. |
+
+### Danh sách và chi tiết
+
+Query danh sách: `page` bắt đầu từ 0 (mặc định 0), `size` từ 1–50 (mặc định 9), `search` tối đa 255 ký tự (không phân biệt hoa/thường; tìm chuỗi trong tên), `status` tùy chọn dùng đúng enum ở mục 7. Response gồm `content`, `page`, `size`, `totalElements`, `totalPages`, `statusCounts`. Mỗi phần tử `content` gồm `id`, `name`, `description`, `thumbnailImageUrl`, `categoryName`, `city`, `address`, `startTime`, `endTime`, `status`, `canEdit`, `canCancel`. `statusCounts` đếm toàn bộ sự kiện của tài khoản theo từng trạng thái, không phụ thuộc bộ lọc. Danh sách trống trả `content: []`, `totalElements: 0`, `totalPages: 0`.
+
+`EventResponse` dùng cho tạo/chi tiết/sửa/hủy trả thêm `categoryName`, `cancelReason`, `canceledAt`, `canEdit`, `canCancel`. FE dùng hai cờ quyền thao tác để hiển thị nút; BE luôn kiểm tra lại trạng thái và thời gian trong transaction. Số vé đã bán = `quantity - remainingQuantity - reservedQuantity`, không tính vé đang giữ chỗ vào vé đã bán.
+
+### Sửa và gửi duyệt lại (UC20)
+
+- Part `event` dùng các trường như request tạo ở mục 7. Mỗi vé/khách mời có thêm `id` khi sửa bản ghi hiện có; bỏ `id` hoặc gửi null khi thêm mới. ID phải thuộc chính sự kiện, không được trùng trong một mảng. Bản ghi cũ không còn trong mảng sẽ được xóa. Phải có ít nhất một loại vé; `guests` có thể trống/null/bỏ qua để xóa toàn bộ khách mời.
+- Ảnh hiện có được giữ khi không gửi file thay thế. Không nhận URL ảnh từ client để cập nhật. Vé mới bắt buộc có `ticketImage{index}`; ảnh khách mời mới tùy chọn. Chỉ số file luôn theo thứ tự mảng JSON sau chỉnh sửa. Ảnh bìa/thumbnail/vé đã lưu không được xóa, có thể thay bằng file mới. `removeImageZone: true` xóa sơ đồ; `guests[i].removeImage: true` xóa ảnh khách mời. Các cờ có thể bỏ qua/false để giữ ảnh; không vừa xóa vừa gửi file thay thế cùng một ảnh.
+- Chỉ sửa `PENDING_APPROVAL` hoặc `APPROVED` trước `startTime`. Validation thời gian, sức chứa, giá và ảnh giữ như tạo sự kiện. Sau sửa, trạng thái là `PENDING_APPROVAL`, xóa thông tin duyệt cũ, tất cả vé `INACTIVE`, tạo thông báo `EVENT_PENDING_APPROVAL` cho Admin ACTIVE.
+- Giữ ID, số vé đã bán và đang giữ chỗ của vé hiện có. Khi đổi tổng số lượng, `remainingQuantity` thay đổi theo chênh lệch; không được giảm tổng dưới số vé đã bán + giữ chỗ. Không xóa loại vé đã bán, giữ chỗ hoặc còn được `booking_items` tham chiếu. Giá trong booking cũ giữ theo `unit_price` đã lưu.
+- Khóa sự kiện và các loại vé khi sửa/hủy. Validation dữ liệu/ảnh hoàn tất trước upload. Upload hoặc lưu DB thất bại thì rollback toàn bộ hồ sơ và dọn ảnh mới đã thử upload như luồng tạo; không gửi file mới thì không cần gọi Cloudinary. Địa điểm dùng chung không bị sửa theo sự kiện này.
+- Thành công trả `200` và hồ sơ đã lưu. `400` khi dữ liệu, ID con hoặc file không hợp lệ; `409` khi trạng thái không cho sửa, số lượng vé hoặc liên kết booking không cho phép thay đổi. Các lỗi ảnh giữ HTTP status như mục 9.
+
+### Gửi yêu cầu hủy (UC23)
+
+`reason` bắt buộc, không chỉ chứa khoảng trắng, tối đa 255 ký tự. Cho phép yêu cầu hủy sự kiện `PENDING_APPROVAL`, `APPROVED` hoặc `ONGOING` khi chưa qua `endTime`. Backend lưu lý do, chuyển sang `PENDING_CANCELLATION`, tạm ngừng bán các loại vé (`INACTIVE`), tạo thông báo `EVENT_PENDING_CANCELLATION` cho Admin ACTIVE. `canceledAt` giữ null vì Admin chưa duyệt hủy. Thành công trả `200` với `EventResponse`; yêu cầu lặp hoặc trạng thái kết thúc/đã hủy/chờ hủy trả `409`. FE không thể sửa hoặc tiếp tục gửi yêu cầu hủy khi đang chờ Admin.
+
+Không xóa sự kiện, booking hoặc vé; không đánh dấu `CANCELED`, hoàn tiền hay triển khai thao tác duyệt của Admin trong endpoint này.
 

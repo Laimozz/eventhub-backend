@@ -13,9 +13,11 @@ public record EventResponse(
         String thumbnailImageUrl, String bannerImageUrl, String imageZoneUrl,
         LocalDateTime startTime, LocalDateTime endTime, EventStatus status,
         LocalDateTime createdAt, VenueResponse venue,
-        List<TicketTypeResponse> ticketTypes, List<GuestResponse> guests) {
+        List<TicketTypeResponse> ticketTypes, List<GuestResponse> guests,
+        String categoryName, String cancelReason, LocalDateTime canceledAt, boolean canEdit, boolean canCancel) {
 
-    public static EventResponse from(Event event, List<TicketType> ticketTypes, List<EventGuest> guests) {
+    public static EventResponse from(Event event, List<TicketType> ticketTypes, List<EventGuest> guests,
+            LocalDateTime now) {
         var venue = event.getVenue();
         return new EventResponse(event.getId(), event.getOrganizer().getId(), event.getCategory().getId(),
                 event.getName(), event.getDescription(), event.getThumbnailImageUrl(), event.getBannerImageUrl(),
@@ -23,7 +25,18 @@ public record EventResponse(
                 event.getCreatedAt(), new VenueResponse(venue.getId(), venue.getCity(), venue.getAddress(),
                         venue.getCapacity()),
                 ticketTypes.stream().map(TicketTypeResponse::from).toList(),
-                guests.stream().map(GuestResponse::from).toList());
+                guests.stream().map(GuestResponse::from).toList(), event.getCategory().getName(),
+                event.getCancelReason(), event.getCanceledAt(), canEdit(event, now), canCancel(event, now));
+    }
+
+    public static boolean canEdit(Event event, LocalDateTime now) {
+        return (event.getStatus() == EventStatus.PENDING_APPROVAL || event.getStatus() == EventStatus.APPROVED)
+                && event.getStartTime().isAfter(now);
+    }
+
+    public static boolean canCancel(Event event, LocalDateTime now) {
+        return (event.getStatus() == EventStatus.PENDING_APPROVAL || event.getStatus() == EventStatus.APPROVED
+                || event.getStatus() == EventStatus.ONGOING) && event.getEndTime().isAfter(now);
     }
 
     public record VenueResponse(Integer id, String city, String address, Integer capacity) {
