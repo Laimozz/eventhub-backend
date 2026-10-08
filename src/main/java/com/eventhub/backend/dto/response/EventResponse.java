@@ -14,7 +14,8 @@ public record EventResponse(
         LocalDateTime startTime, LocalDateTime endTime, EventStatus status,
         LocalDateTime createdAt, VenueResponse venue,
         List<TicketTypeResponse> ticketTypes, List<GuestResponse> guests,
-        String categoryName, String cancelReason, LocalDateTime canceledAt, boolean canEdit, boolean canCancel) {
+        String categoryName, String cancelReason, LocalDateTime canceledAt, boolean canEdit, boolean canCancel,
+        String rejectReason) {
 
     public static EventResponse from(Event event, List<TicketType> ticketTypes, List<EventGuest> guests,
             LocalDateTime now) {
@@ -26,7 +27,8 @@ public record EventResponse(
                         venue.getCapacity()),
                 ticketTypes.stream().map(TicketTypeResponse::from).toList(),
                 guests.stream().map(GuestResponse::from).toList(), event.getCategory().getName(),
-                event.getCancelReason(), event.getCanceledAt(), canEdit(event, now), canCancel(event, now));
+                event.getCancelReason(), event.getCanceledAt(), canEdit(event, now), canCancel(event, now),
+                event.getRejectReason());
     }
 
     public static boolean canEdit(Event event, LocalDateTime now) {

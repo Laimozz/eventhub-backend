@@ -2,11 +2,11 @@
 
 Base URL local: `http://localhost:8080`.
 
-Tài liệu mô tả các endpoint đang được triển khai trong `AuthController` và `EventController`.
+Tài liệu mô tả các endpoint xác thực, Organizer, **11 API Admin UC31–36** (mục 11) và **API thông báo** (mục 12), gồm request/response, quyền truy cập, validation và status code.
 
 ### Headers và cookie
 
-Mọi endpoint dưới đây đều dùng POST và bắt buộc có:
+Các request thay đổi dữ liệu (POST/PUT/PATCH/DELETE) bắt buộc có header:
 
 ```http
 X-CSRF-Protection: 1
@@ -21,6 +21,18 @@ X-CSRF-Protection: 1
 | Hỗ trợ UC02 | Cấp lại token | `POST /api/auth/refresh` | Required — refresh token | `200 OK` |
 | UC03 | Đăng xuất | `POST /api/auth/logout` | Public — cookie tùy chọn | `204 No Content` |
 | UC19 | Tạo sự kiện | `POST /api/events` | Required — access token, role `ORGANIZER` | `201 Created` |
+| UC31 | Danh sách người dùng | `GET /api/admin/users` | Required — access token, role `ADMIN` | `200 OK` |
+| UC31 | Tạo người dùng | `POST /api/admin/users` | Required — access token, role `ADMIN` | `201 Created` |
+| UC31 | Khóa/mở người dùng | `PATCH /api/admin/users/{userId}/status` | Required — access token, role `ADMIN` | `200 OK` |
+| UC32 | Danh sách danh mục | `GET /api/admin/event-categories` | Required — access token, role `ADMIN` | `200 OK` |
+| UC32 | Thêm danh mục | `POST /api/admin/event-categories` | Required — access token, role `ADMIN` | `201 Created` |
+| UC32 | Sửa danh mục | `PUT /api/admin/event-categories/{categoryId}` | Required — access token, role `ADMIN` | `200 OK` |
+| UC32 | Xóa danh mục | `DELETE /api/admin/event-categories/{categoryId}` | Required — access token, role `ADMIN` | `204 No Content` |
+| UC33 | Danh sách sự kiện chờ duyệt | `GET /api/admin/events/pending` | Required — access token, role `ADMIN` | `200 OK` |
+| UC34 | Chi tiết hồ sơ xét duyệt | `GET /api/admin/events/pending/{eventId}` | Required — access token, role `ADMIN` | `200 OK` |
+| UC35 | Duyệt sự kiện | `POST /api/admin/events/{eventId}/approve` | Required — access token, role `ADMIN` | `200 OK` |
+| UC36 | Từ chối sự kiện | `POST /api/admin/events/{eventId}/reject` | Required — access token, role `ADMIN` | `200 OK` |
+| Hỗ trợ UC35–36 | Organizer đọc thông báo | `GET /api/notifications` | Required — access token, role `ORGANIZER` | `200 OK` |
 
 ## 3. Đăng ký tài khoản
 
@@ -321,6 +333,7 @@ Backend lấy Organizer từ phiên đăng nhập, tự gán `status = PENDING_A
 | --- | --- |
 | `PENDING_APPROVAL` | Chờ duyệt |
 | `APPROVED` | Đã duyệt |
+| `REJECTED` | Bị từ chối, lý do trong rejectReason |
 | `ONGOING` | Đang diễn ra |
 | `COMPLETED` | Đã kết thúc |
 | `PENDING_CANCELLATION` | Chờ hủy |
@@ -328,7 +341,7 @@ Backend lấy Organizer từ phiên đăng nhập, tự gán `status = PENDING_A
 
 Sự kiện chờ duyệt được lưu trong DB để chức năng Admin truy vấn sau. Sau khi lưu dữ liệu sự kiện, backend tìm Admin ACTIVE và tạo một bản ghi `notifications` trong cùng transaction: `users_id` là ID của Admin, `title = Có sự kiện mới chờ duyệt`, `type = EVENT_PENDING_APPROVAL`, `is_read = false`, nội dung chứa tên sự kiện. Tên dài được rút gọn trong thông báo để giữ nội dung trong giới hạn 255 ký tự của DB. Thông báo chỉ để hiển thị. Nếu chưa có Admin ACTIVE, sự kiện vẫn được tạo; nếu lưu thông báo thất bại, toàn bộ transaction rollback. Với giả định hệ thống có một Admin, truy vấn lấy một Admin ACTIVE theo ID tăng dần.
 
-API Organizer gửi yêu cầu hủy được mô tả ở mục 10. API Admin duyệt, chuyển trạng thái theo thời gian, xem/đánh dấu đã đọc thông báo và mở bán vé thuộc các tính năng tương ứng.
+API Organizer gửi yêu cầu hủy được mô tả ở mục 10. API Admin duyệt/từ chối và cập nhật trạng thái vé được mô tả ở mục 11; Organizer đọc thông báo tại mục 12. Chuyển trạng thái sự kiện theo thời gian, Admin đọc thông báo, đánh dấu đã đọc và nghiệp vụ bán vé thuộc các tính năng tương ứng.
 
 | HTTP status | Trường hợp |
 | --- | --- |
@@ -378,7 +391,7 @@ Các endpoint dưới đây chỉ dành cho ORGANIZER ACTIVE, lấy tài khoản
 
 Query danh sách: `page` bắt đầu từ 0 (mặc định 0), `size` từ 1–50 (mặc định 9), `search` tối đa 255 ký tự (không phân biệt hoa/thường; tìm chuỗi trong tên), `status` tùy chọn dùng đúng enum ở mục 7. Response gồm `content`, `page`, `size`, `totalElements`, `totalPages`, `statusCounts`. Mỗi phần tử `content` gồm `id`, `name`, `description`, `thumbnailImageUrl`, `categoryName`, `city`, `address`, `startTime`, `endTime`, `status`, `canEdit`, `canCancel`. `statusCounts` đếm toàn bộ sự kiện của tài khoản theo từng trạng thái, không phụ thuộc bộ lọc. Danh sách trống trả `content: []`, `totalElements: 0`, `totalPages: 0`.
 
-`EventResponse` dùng cho tạo/chi tiết/sửa/hủy trả thêm `categoryName`, `cancelReason`, `canceledAt`, `canEdit`, `canCancel`. FE dùng hai cờ quyền thao tác để hiển thị nút; BE luôn kiểm tra lại trạng thái và thời gian trong transaction. Số vé đã bán = `quantity - remainingQuantity - reservedQuantity`, không tính vé đang giữ chỗ vào vé đã bán.
+`EventResponse` dùng cho tạo/chi tiết/sửa/hủy trả thêm `categoryName`, `cancelReason`, `canceledAt`, `canEdit`, `canCancel`, `rejectReason`. FE dùng hai cờ quyền thao tác để hiển thị nút; BE luôn kiểm tra lại trạng thái và thời gian trong transaction. Số vé đã bán = `quantity - remainingQuantity - reservedQuantity`, không tính vé đang giữ chỗ vào vé đã bán. REJECTED không được sửa/gửi lại trong phạm vi hiện tại.
 
 ### Sửa và gửi duyệt lại (UC20)
 
@@ -395,3 +408,711 @@ Query danh sách: `page` bắt đầu từ 0 (mặc định 0), `size` từ 1–
 
 Không xóa sự kiện, booking hoặc vé; không đánh dấu `CANCELED`, hoàn tiền hay triển khai thao tác duyệt của Admin trong endpoint này.
 
+<a id="admin-api"></a>
+
+## 11. API quản trị UC31–36
+
+11 endpoint trong mục này chỉ dành cho tài khoản `ADMIN` đang `ACTIVE`. API thông báo dành cho Organizer nằm ở mục 12. Hợp đồng dưới đây phản ánh code hiện tại.
+
+### Quy ước chung
+
+- Xác thực bằng cookie HttpOnly hiện có. Trình duyệt gửi `credentials: "include"` hoặc Axios `withCredentials: true`; frontend dùng HTTP client chung để xử lý refresh.
+- Request POST/PUT/PATCH/DELETE bắt buộc có `X-CSRF-Protection: 1`. Request có body gửi JSON với `Content-Type: application/json`. GET không bắt buộc header CSRF.
+- Admin, người nhận thông báo và thời gian quyết định lấy từ phiên/server; client không gửi `adminId`, `reviewedBy` hoặc `reviewedAt`. Response không chứa mật khẩu/hash; trường số điện thoại là `phone`.
+- Danh sách: `page` mặc định 0 và không âm; `pageSize` mặc định 20, từ 1–100; sắp xếp ID giảm dần. Response gồm `items`, `page`, `pageSize`, `totalElements`, `totalPages`. Trang không có kết quả trả `items: []`; tập kết quả rỗng có `totalElements: 0`, `totalPages: 0`.
+- Thời gian nghiệp vụ là chuỗi UTC không offset, ví dụ `2026-10-07T10:00:00`; FE hiển thị GMT+7. Tiền là VND, backend dùng BigDecimal.
+- Lỗi validation, xác thực, phân quyền và nghiệp vụ được xử lý có cấu trúc `{timestamp,status,code,message,path,errors}`. Validation có lỗi theo trường trong `errors`; timestamp lỗi là Instant UTC có hậu tố `Z`. Lỗi `500` ngoài dự kiến chưa được chuẩn hóa về cấu trúc này.
+- `400`: dữ liệu/tham số sai; `401`: phiên không hợp lệ hoặc tài khoản bị khóa; `403`: sai role hoặc thiếu/sai CSRF; `404`/`409`: theo từng endpoint. CSRF được kiểm tra trước xác thực nên request ghi thiếu header có thể trả `403` dù chưa đăng nhập.
+- FK/unique index bảo vệ cả request đồng thời. Xung đột ràng buộc DB chưa được ánh xạ riêng trả `409 DATA_CONFLICT`.
+
+Ví dụ lỗi nghiệp vụ:
+
+```json
+{
+  "timestamp": "2026-10-07T10:00:00Z",
+  "status": 409,
+  "code": "CATEGORY_IN_USE",
+  "message": "Danh mục đang được sử dụng",
+  "path": "/api/admin/event-categories/3",
+  "errors": {}
+}
+```
+
+Ví dụ lỗi validation khi thiếu lý do từ chối:
+
+```json
+{
+  "timestamp": "2026-10-07T10:00:00Z",
+  "status": 400,
+  "code": "VALIDATION_ERROR",
+  "message": "Request validation failed",
+  "path": "/api/admin/events/42/reject",
+  "errors": {
+    "reason": "must not be blank"
+  }
+}
+```
+
+### 11.1. Danh sách người dùng (UC31)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/admin/users` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ADMIN` |
+| **Path Parameters** | Không có. |
+| **Query Parameters** | `keyword` (string, tùy chọn, mặc định chuỗi rỗng): tìm tên/email không phân biệt hoa thường, trim và tìm chuỗi literal; `role` (tùy chọn): ADMIN/CUSTOMER/ORGANIZER/STAFF. `page` (integer, tùy chọn, mặc định 0, không âm), `pageSize` (integer, tùy chọn, mặc định 20, từ 1–100). |
+
+#### Request Body
+
+Không có.
+
+#### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+{
+  "items": [
+    {
+      "id": 12,
+      "fullName": "Người dùng mẫu",
+      "email": "member@example.invalid",
+      "phone": "0900000000",
+      "role": "CUSTOMER",
+      "status": "ACTIVE"
+    }
+  ],
+  "page": 0,
+  "pageSize": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+Không có kết quả trả `200` với `items: []`. Kết quả sắp xếp ID giảm dần.
+
+#### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `INVALID_PAGE` / `INVALID_REQUEST` | Phân trang không hợp lệ hoặc role sai. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+### 11.2. Tạo người dùng (UC31)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `POST /api/admin/users` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ADMIN` |
+| **Path Parameters** | Không có. |
+| **Query Parameters** | Không có. |
+
+#### Request Body
+
+JSON với `Content-Type: application/json` và `X-CSRF-Protection: 1`.
+
+| Field | Kiểu | Quy tắc |
+| --- | --- | --- |
+| `fullName` | string | Không rỗng/toàn khoảng trắng, trim, tối đa 255 ký tự. |
+| `email` | string | Đúng định dạng email, trim và lowercase, tối đa 255 ký tự; duy nhất sau chuẩn hóa. |
+| `phone` | string | Không rỗng/toàn khoảng trắng, trim, tối đa 20 ký tự. |
+| `password` | string | Không rỗng/toàn khoảng trắng, 8–72 ký tự và tối đa 72 byte UTF-8; không trim. |
+| `role` | string | Chỉ CUSTOMER hoặc ORGANIZER. |
+
+```json
+{
+  "fullName": "Người dùng mẫu",
+  "email": "member@example.invalid",
+  "phone": "0900000000",
+  "password": "<mật khẩu hợp lệ>",
+  "role": "CUSTOMER"
+}
+```
+
+#### Response mẫu
+
+**Thành công — `201 Created`:**
+
+```json
+{
+  "id": 12,
+  "fullName": "Người dùng mẫu",
+  "email": "member@example.invalid",
+  "phone": "0900000000",
+  "role": "CUSTOMER",
+  "status": "ACTIVE"
+}
+```
+
+Tất cả trường đều bắt buộc. Tài khoản mới có trạng thái `ACTIVE`; mật khẩu được băm bằng BCrypt chung của auth và không được trả trong response. STAFF được quản lý qua nghiệp vụ phân công; API này không tạo ADMIN/STAFF.
+
+#### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `VALIDATION_ERROR` / `INVALID_REQUEST` | Thiếu/sai dữ liệu, role không được phép hoặc mật khẩu không hợp lệ. |
+| `409` | `EMAIL_ALREADY_EXISTS` | Email đã tồn tại, kể cả khi tạo đồng thời. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role hoặc thiếu/sai header CSRF. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+### 11.3. Khóa/mở người dùng (UC31)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `PATCH /api/admin/users/{userId}/status` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ADMIN` |
+| **Path Parameters** | `userId`: integer dương, ID người dùng. |
+| **Query Parameters** | Không có. |
+
+#### Request Body
+
+JSON với `Content-Type: application/json` và `X-CSRF-Protection: 1`.
+
+| Field | Kiểu | Quy tắc |
+| --- | --- | --- |
+| `status` | string | Bắt buộc; ACTIVE hoặc LOCKED. |
+
+```json
+{
+  "status": "LOCKED"
+}
+```
+
+#### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+{
+  "id": 12,
+  "fullName": "Người dùng mẫu",
+  "email": "member@example.invalid",
+  "phone": "0900000000",
+  "role": "CUSTOMER",
+  "status": "LOCKED"
+}
+```
+
+Gửi `{"status":"ACTIVE"}` để mở khóa. Đặt lại cùng trạng thái vẫn thành công. Không được tự khóa tài khoản đang đăng nhập. Auth đọc trạng thái DB trên mỗi request và khi refresh nên tài khoản bị khóa không dùng được access/refresh còn hạn. Sau mở khóa, phiên còn hiệu lực có thể xác thực lại; nếu cookie đã bị xóa sau refresh thất bại thì cần đăng nhập lại.
+
+#### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `INVALID_ID` / `VALIDATION_ERROR` / `INVALID_REQUEST` | ID hoặc status không hợp lệ. |
+| `404` | `USER_NOT_FOUND` | Người dùng không tồn tại. |
+| `409` | `CANNOT_LOCK_SELF` | Admin tự khóa tài khoản đang đăng nhập. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role hoặc thiếu/sai header CSRF. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+### 11.4. Danh sách danh mục (UC32)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/admin/event-categories` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ADMIN` |
+| **Path Parameters** | Không có. |
+| **Query Parameters** | `page` (integer, tùy chọn, mặc định 0, không âm), `pageSize` (integer, tùy chọn, mặc định 20, từ 1–100). |
+
+#### Request Body
+
+Không có.
+
+#### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+{
+  "items": [
+    {
+      "id": 3,
+      "name": "Âm nhạc",
+      "description": "Biểu diễn âm nhạc"
+    }
+  ],
+  "page": 0,
+  "pageSize": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+Danh sách rỗng trả `200` với `items: []`. API Organizer `GET /api/categories` tiếp tục đọc cùng bảng; endpoint admin trả phân trang và sắp xếp ID giảm dần.
+
+#### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `INVALID_PAGE` / `INVALID_REQUEST` | Phân trang không hợp lệ. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+### 11.5. Thêm danh mục (UC32)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `POST /api/admin/event-categories` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ADMIN` |
+| **Path Parameters** | Không có. |
+| **Query Parameters** | Không có. |
+
+#### Request Body
+
+JSON với `Content-Type: application/json` và `X-CSRF-Protection: 1`.
+
+| Field | Kiểu | Quy tắc |
+| --- | --- | --- |
+| `name` | string | Bắt buộc, trim, không trắng, tối đa 255 ký tự; duy nhất theo LOWER(BTRIM(name)). |
+| `description` | string | Bắt buộc, trim, không trắng, tối đa 255 ký tự. |
+
+```json
+{
+  "name": "Âm nhạc",
+  "description": "Biểu diễn âm nhạc"
+}
+```
+
+#### Response mẫu
+
+**Thành công — `201 Created`:**
+
+```json
+{
+  "id": 3,
+  "name": "Âm nhạc",
+  "description": "Biểu diễn âm nhạc"
+}
+```
+
+Unique index bảo vệ tên danh mục cả khi có request đồng thời.
+
+#### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `VALIDATION_ERROR` / `INVALID_REQUEST` | Tên hoặc mô tả không hợp lệ. |
+| `409` | `CATEGORY_NAME_ALREADY_EXISTS` | Tên danh mục đã tồn tại sau chuẩn hóa. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role hoặc thiếu/sai header CSRF. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+### 11.6. Sửa danh mục (UC32)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `PUT /api/admin/event-categories/{categoryId}` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ADMIN` |
+| **Path Parameters** | `categoryId`: integer dương, ID danh mục. |
+| **Query Parameters** | Không có. |
+
+#### Request Body
+
+JSON với `Content-Type: application/json` và `X-CSRF-Protection: 1`.
+
+| Field | Kiểu | Quy tắc |
+| --- | --- | --- |
+| `name` | string | Bắt buộc, trim, không trắng, tối đa 255 ký tự; duy nhất theo LOWER(BTRIM(name)). |
+| `description` | string | Bắt buộc, trim, không trắng, tối đa 255 ký tự. |
+
+```json
+{
+  "name": "Âm nhạc",
+  "description": "Biểu diễn âm nhạc cập nhật"
+}
+```
+
+#### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+{
+  "id": 3,
+  "name": "Âm nhạc",
+  "description": "Biểu diễn âm nhạc cập nhật"
+}
+```
+
+Gửi đầy đủ tên và mô tả. Giữ nguyên tên của chính bản ghi được phép.
+
+#### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `INVALID_ID` / `VALIDATION_ERROR` / `INVALID_REQUEST` | ID, tên hoặc mô tả không hợp lệ. |
+| `404` | `CATEGORY_NOT_FOUND` | Danh mục không tồn tại. |
+| `409` | `CATEGORY_NAME_ALREADY_EXISTS` | Tên trùng với danh mục khác. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role hoặc thiếu/sai header CSRF. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+### 11.7. Xóa danh mục (UC32)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `DELETE /api/admin/event-categories/{categoryId}` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ADMIN` |
+| **Path Parameters** | `categoryId`: integer dương, ID danh mục. |
+| **Query Parameters** | Không có. |
+
+#### Request Body
+
+Không có.
+
+#### Response mẫu
+
+**Thành công — `204 No Content`:**
+
+```http
+HTTP/1.1 204 No Content
+```
+
+Không có response body. Chặn xóa nếu bất kỳ sự kiện nào đang tham chiếu, kể cả chờ duyệt/từ chối. Không cascade xóa sự kiện; khóa ngoại bảo vệ cả trường hợp có sự kiện được tạo đồng thời.
+
+#### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `INVALID_ID` / `INVALID_REQUEST` | ID không hợp lệ. |
+| `404` | `CATEGORY_NOT_FOUND` | Danh mục không tồn tại. |
+| `409` | `CATEGORY_IN_USE` | Danh mục đang được sự kiện sử dụng. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role hoặc thiếu/sai header CSRF. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+### 11.8. Danh sách sự kiện chờ duyệt (UC33)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/admin/events/pending` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ADMIN` |
+| **Path Parameters** | Không có. |
+| **Query Parameters** | `page` (integer, tùy chọn, mặc định 0, không âm), `pageSize` (integer, tùy chọn, mặc định 20, từ 1–100). |
+
+#### Request Body
+
+Không có.
+
+#### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+{
+  "items": [
+    {
+      "id": 42,
+      "name": "Đêm nhạc",
+      "thumbnailImageUrl": "https://example.invalid/thumbnail.png",
+      "categoryName": "Âm nhạc",
+      "organizer": {
+        "id": 13,
+        "fullName": "Nhà tổ chức mẫu",
+        "email": "organizer@example.invalid"
+      },
+      "createdAt": "2026-10-07T03:00:00",
+      "status": "PENDING_APPROVAL"
+    }
+  ],
+  "page": 0,
+  "pageSize": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+Server cố định trạng thái `PENDING_APPROVAL`; không nhận bộ lọc trạng thái. Danh sách rỗng trả `200` với `items: []`; sắp xếp ID giảm dần.
+
+#### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `INVALID_PAGE` / `INVALID_REQUEST` | Phân trang không hợp lệ. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+### 11.9. Chi tiết hồ sơ xét duyệt (UC34)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/admin/events/pending/{eventId}` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ADMIN` |
+| **Path Parameters** | `eventId`: integer dương, ID sự kiện. |
+| **Query Parameters** | Không có. |
+
+#### Request Body
+
+Không có.
+
+#### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+{
+  "event": {
+    "id": 42,
+    "organizerId": 13,
+    "categoryId": 3,
+    "name": "Đêm nhạc",
+    "description": "Biểu diễn",
+    "thumbnailImageUrl": "https://example.invalid/thumb.png",
+    "bannerImageUrl": "https://example.invalid/banner.png",
+    "imageZoneUrl": null,
+    "startTime": "2026-11-10T12:00:00",
+    "endTime": "2026-11-10T15:00:00",
+    "status": "PENDING_APPROVAL",
+    "createdAt": "2026-10-07T03:00:00",
+    "venue": {
+      "id": 2,
+      "city": "Hồ Chí Minh",
+      "address": "Địa điểm mẫu",
+      "capacity": 100
+    },
+    "ticketTypes": [
+      {
+        "id": 5,
+        "name": "Vé phổ thông",
+        "description": "Vào cửa",
+        "imageUrl": "https://example.invalid/ticket.png",
+        "price": 200000,
+        "quantity": 100,
+        "reservedQuantity": 0,
+        "remainingQuantity": 100,
+        "saleStartTime": "2026-10-09T01:00:00",
+        "saleEndTime": "2026-11-09T10:00:00",
+        "status": "INACTIVE"
+      }
+    ],
+    "guests": [
+      {
+        "id": 7,
+        "name": "Khách mời",
+        "role": "Ca sĩ",
+        "description": "Biểu diễn",
+        "imageUrl": null
+      }
+    ],
+    "categoryName": "Âm nhạc",
+    "cancelReason": null,
+    "canceledAt": null,
+    "canEdit": true,
+    "canCancel": true,
+    "rejectReason": null
+  },
+  "organizer": {
+    "id": 13,
+    "fullName": "Nhà tổ chức mẫu",
+    "email": "organizer@example.invalid"
+  },
+  "version": 0
+}
+```
+
+`event` dùng cấu trúc `EventResponse` hiện có, gồm ảnh, địa điểm/sức chứa, thời gian, danh mục, vé và khách mời. `organizer` chứa thông tin Nhà tổ chức; `version` dùng khi duyệt/từ chối. `canEdit`/`canCancel` mô tả khả năng của Organizer, không cấp quyền chỉnh sửa cho Admin. Backend khóa bản ghi khi đọc hồ sơ để version, vé và khách mời thuộc cùng một lần cập nhật.
+
+#### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `INVALID_ID` / `INVALID_REQUEST` | ID không hợp lệ. |
+| `404` | `EVENT_NOT_FOUND` | Sự kiện không tồn tại. |
+| `409` | `EVENT_NOT_PENDING` | Sự kiện không còn chờ duyệt. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+### 11.10. Duyệt sự kiện (UC35)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `POST /api/admin/events/{eventId}/approve` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ADMIN` |
+| **Path Parameters** | `eventId`: integer dương, ID sự kiện. |
+| **Query Parameters** | Không có. |
+
+#### Request Body
+
+JSON với `Content-Type: application/json` và `X-CSRF-Protection: 1`.
+
+| Field | Kiểu | Quy tắc |
+| --- | --- | --- |
+| `version` | integer (int64) | Bắt buộc, không âm; lấy từ hồ sơ UC34 vừa đọc. |
+
+```json
+{
+  "version": 0
+}
+```
+
+#### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+{
+  "eventId": 42,
+  "status": "APPROVED",
+  "reviewedBy": 1,
+  "reviewedAt": "2026-10-07T10:00:00",
+  "reason": null,
+  "version": 1
+}
+```
+
+Chỉ xử lý `PENDING_APPROVAL` và version còn khớp. Lưu danh tính Admin từ principal, giờ UTC server; chuyển sự kiện thành `APPROVED`, xóa lý do từ chối, vé chuyển `ACTIVE`, tạo thông báo cho Organizer. Việc bán vé vẫn phải tuân thủ cửa sổ thời gian bán. Frontend yêu cầu xác nhận; hủy dialog không gọi API.
+
+#### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `INVALID_ID` / `VALIDATION_ERROR` / `INVALID_REQUEST` | ID hoặc version không hợp lệ. |
+| `404` | `EVENT_NOT_FOUND` | Sự kiện không tồn tại. |
+| `409` | `EVENT_NOT_PENDING` | Sự kiện không còn chờ duyệt. |
+| `409` | `EVENT_VERSION_CONFLICT` | Hồ sơ đã thay đổi; cần đọc lại UC34 trước khi quyết định. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role hoặc thiếu/sai header CSRF. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+### 11.11. Từ chối sự kiện (UC36)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `POST /api/admin/events/{eventId}/reject` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ADMIN` |
+| **Path Parameters** | `eventId`: integer dương, ID sự kiện. |
+| **Query Parameters** | Không có. |
+
+#### Request Body
+
+JSON với `Content-Type: application/json` và `X-CSRF-Protection: 1`.
+
+| Field | Kiểu | Quy tắc |
+| --- | --- | --- |
+| `version` | integer (int64) | Bắt buộc, không âm; lấy từ hồ sơ UC34 vừa đọc. |
+| `reason` | string | Bắt buộc, trim, không trắng, tối đa 255 ký tự. |
+
+```json
+{
+  "version": 0,
+  "reason": "Vui lòng bổ sung thông tin địa điểm."
+}
+```
+
+#### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+{
+  "eventId": 42,
+  "status": "REJECTED",
+  "reviewedBy": 1,
+  "reviewedAt": "2026-10-07T10:00:00",
+  "reason": "Vui lòng bổ sung thông tin địa điểm.",
+  "version": 1
+}
+```
+
+Chỉ xử lý `PENDING_APPROVAL` và version còn khớp. Chuyển sự kiện thành `REJECTED`, vé `INACTIVE`; lưu Admin từ principal, giờ UTC server và lý do; tạo thông báo cho Organizer. `GET /api/events/{eventId}` trả `rejectReason`; frontend hiển thị trạng thái/lý do. Chưa mở quyền sửa/gửi lại REJECTED. Hủy dialog không gọi API.
+
+#### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `INVALID_ID` / `VALIDATION_ERROR` / `INVALID_REQUEST` | ID, version hoặc lý do không hợp lệ. |
+| `404` | `EVENT_NOT_FOUND` | Sự kiện không tồn tại. |
+| `409` | `EVENT_NOT_PENDING` | Sự kiện không còn chờ duyệt. |
+| `409` | `EVENT_VERSION_CONFLICT` | Hồ sơ đã thay đổi; cần đọc lại UC34 trước khi quyết định. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role hoặc thiếu/sai header CSRF. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+### 11.12. Transaction, version và thông báo xét duyệt
+
+Quyết định, trạng thái vé và bản ghi `notifications` được lưu trong cùng transaction. Lưu thông báo lỗi thì rollback toàn bộ; không có gửi email hoặc tác vụ delivery ngoài DB. Duyệt/từ chối lặp hoặc đồng thời chỉ một quyết định thành công, một thông báo.
+
+Event dùng `@Version`. Organizer sửa/hủy dùng `PESSIMISTIC_FORCE_INCREMENT`, bảo đảm thay đổi chỉ vé/khách mời cũng tăng version. Admin đọc/xử lý khóa cùng bản ghi, kiểm tra `PENDING_APPROVAL` rồi so version. Khi nhận `404`/`409`, frontend chặn quyết định tiếp cho đến khi đọc lại hồ sơ. Form giữ dữ liệu khi lỗi có thể thử lại, chặn gửi lặp; hủy dialog không gọi API.
+
+### 11.13. Migration và kiểm thử
+
+V4 thêm version mặc định 0, trạng thái REJECTED và unique index tên danh mục. Không chỉnh V1–V3. Nếu dữ liệu đang có tên trùng sau chuẩn hóa, migration dừng; cần xử lý dữ liệu theo quyết định của nhóm, không tự gộp/xóa.
+AdminIntegrationTests kiểm tra security, tạo user/hash, khóa phiên, danh mục, version, tranh chấp quyết định, rollback thông báo và giới hạn dữ liệu người nhận. Test PostgreSQL chạy trong môi trường riêng theo README.
+
+## 12. Organizer đọc thông báo (Hỗ trợ UC35–36)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/notifications` |
+| **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
+| **Role được phép sử dụng** | `ORGANIZER` |
+| **Path Parameters** | Không có. |
+| **Query Parameters** | `page` (integer, tùy chọn, mặc định 0, không âm), `pageSize` (integer, tùy chọn, mặc định 20, từ 1–100). |
+
+### Request Body
+
+Không có.
+
+### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+{
+  "items": [
+    {
+      "id": 8,
+      "title": "Sự kiện #42 bị từ chối",
+      "content": "Vui lòng bổ sung thông tin địa điểm.",
+      "type": "EVENT_REJECTED",
+      "createdAt": "2026-10-07T10:00:00",
+      "read": false
+    }
+  ],
+  "page": 0,
+  "pageSize": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông báo của tài khoản đang đăng nhập, sắp xếp ID giảm dần. Type xét duyệt là `EVENT_APPROVED`/`EVENT_REJECTED`. Danh sách rỗng trả `200` với `items: []`. Endpoint chỉ đọc, chưa đánh dấu thông báo đã đọc; không gửi email.
+
+### Mã lỗi
+
+| HTTP status | Code | Trường hợp |
+| --- | --- | --- |
+| `400` | `INVALID_PAGE` / `INVALID_REQUEST` | Phân trang không hợp lệ. |
+| `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
+| `403` | `FORBIDDEN` | Sai role. |
+
+Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.

@@ -13,7 +13,17 @@ Backend của dự án EventHub, sử dụng Java 21, Spring Boot và Maven. REA
 | Kiểm thử | Spring Boot Test và JUnit |
 | Database | PostgreSQL 16+, Spring Data JPA, Flyway |
 
-Hiện tại dự án có 20 entity/repository, migration Flyway và kiểm thử tích hợp PostgreSQL. API gồm đăng ký, đăng nhập, refresh, đăng xuất bằng JWT qua HttpOnly Cookie; Organizer tạo, xem danh sách/chi tiết, sửa và gửi yêu cầu hủy sự kiện. Xem [tài liệu API](api-endpoints.md) để tích hợp cookie, header bảo vệ CSRF và hợp đồng quản lý sự kiện.
+Hiện tại dự án có entity/repository, migration Flyway và kiểm thử tích hợp PostgreSQL. API gồm xác thực bằng JWT qua HttpOnly Cookie; Organizer quản lý sự kiện; Admin quản lý người dùng/danh mục và xét duyệt UC31–36. Xem [tài liệu API](api-endpoints.md) và [API quản trị](api-endpoints.md#admin-api).
+
+### Quản trị UC31–36
+
+- Admin tạo CUSTOMER/ORGANIZER, tìm/lọc và khóa/mở tài khoản; không tự khóa, không tạo thêm Admin/Staff. Auth kiểm tra trạng thái DB cả access và refresh.
+- Danh mục có tên duy nhất không phân biệt hoa/thường sau trim; không xóa nếu có sự kiện tham chiếu.
+- Duyệt chuyển PENDING_APPROVAL → APPROVED, vé ACTIVE; từ chối chuyển REJECTED, vé INACTIVE và lưu lý do tối đa 255 ký tự. Người/thời gian xử lý lấy từ server.
+- Version và khóa bản ghi bảo vệ quyết định đồng thời hoặc dựa trên nội dung cũ. Luồng Organizer sửa/hủy dùng cùng khóa; sửa chỉ khách mời/vé cũng tăng version.
+- Thông báo lưu cùng transaction, Organizer đọc qua GET /api/notifications và thấy rejectReason ở chi tiết sự kiện. Không có email; lỗi lưu thông báo rollback quyết định để thử lại.
+- Flyway V4 thêm version, REJECTED và unique index danh mục. Nếu có tên trùng sau chuẩn hóa, migration dừng; xử lý dữ liệu có chủ đích trước khi chạy lại, không tự gộp/xóa.
+- Dùng JDK21 khi chạy Maven. AdminIntegrationTests kiểm tra API thật trên PostgreSQL test riêng. Không chạy migration/test vào DB nghiệp vụ.
 
 ## 2. Chuẩn bị và chạy dự án
 
@@ -140,7 +150,7 @@ Frontend cần gửi credentials và header `X-CSRF-Protection: 1` khi gọi POS
 
 ### Tạo sự kiện
 
-`POST /api/events` dành cho `ORGANIZER`, lưu địa điểm mới, sự kiện, loại vé và khách mời (nếu có) trong cùng transaction. Danh mục được chọn bằng `categoryId` đã tồn tại. Sự kiện mới luôn là `PENDING_APPROVAL` để Admin xét duyệt sau; chưa triển khai API duyệt. Hệ thống có một Admin: khi có Admin ACTIVE, tạo một thông báo chưa đọc `EVENT_PENDING_APPROVAL` trong cùng transaction; nếu chưa có Admin ACTIVE, sự kiện vẫn nằm trong hàng chờ duyệt. Thông báo chỉ hiển thị nội dung, dùng bảng hiện tại với `users_id`. Loại vé khởi tạo `INACTIVE`, số vé giữ chỗ bằng 0 và số vé còn lại bằng số lượng. Chi tiết request, validation và sáu trạng thái nằm trong [tài liệu API](api-endpoints.md#7-tạo-sự-kiện).
+`POST /api/events` dành cho `ORGANIZER`, lưu địa điểm mới, sự kiện, loại vé và khách mời (nếu có) trong cùng transaction. Danh mục được chọn bằng `categoryId` đã tồn tại. Sự kiện mới luôn là `PENDING_APPROVAL` để Admin xét duyệt qua [API quản trị](api-endpoints.md#admin-api). Hệ thống có một Admin: khi có Admin ACTIVE, tạo một thông báo chưa đọc `EVENT_PENDING_APPROVAL` trong cùng transaction; nếu chưa có Admin ACTIVE, sự kiện vẫn nằm trong hàng chờ duyệt. Thông báo chỉ hiển thị nội dung, dùng bảng hiện tại với `users_id`. Loại vé khởi tạo `INACTIVE`, số vé giữ chỗ bằng 0 và số vé còn lại bằng số lượng. Chi tiết request, validation và các trạng thái nằm trong [tài liệu API](api-endpoints.md#7-tạo-sự-kiện).
 
 Form frontend dùng `GET /api/categories` để lấy danh mục trong DB. Ảnh được xem trước tại trình duyệt, chưa upload khi chọn file. Khi gửi duyệt, frontend gọi API duy nhất `POST /api/events` trong `EventController` với multipart gồm JSON sự kiện và các file ảnh (mỗi file PNG/JPEG tối đa 5 MB, 20 megapixel; tổng request tối đa 50 MB). Request JSON chỉ chứa thông tin sự kiện, vé và khách mời; không nhận URL ảnh từ client, không hỗ trợ body JSON riêng. Backend kiểm tra toàn bộ dữ liệu/file, lưu và flush hồ sơ trong transaction trước khi gọi [Cloudinary Upload API](https://cloudinary.com/documentation/image_upload_api_reference) bằng Spring RestClient hiện có. Sau khi upload, cập nhật URL HTTPS (`secure_url`) vào các cột ảnh hiện có rồi commit; response trả hồ sơ và URL. `EventService` xử lý tạo hồ sơ và transaction, `EventImageService` xử lý ảnh và Cloudinary. Không có endpoint upload ảnh riêng, thư mục lưu ảnh hoặc API đọc ảnh local.
 
