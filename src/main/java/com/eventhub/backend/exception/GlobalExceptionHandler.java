@@ -28,6 +28,21 @@ import tools.jackson.databind.ObjectMapper;
 public class GlobalExceptionHandler implements AuthenticationEntryPoint, AccessDeniedHandler {
     private final ObjectMapper objectMapper;
 
+    @ExceptionHandler(AdminException.class)
+    ResponseEntity<ApiError> handleAdmin(AdminException exception, HttpServletRequest request) {
+        return error(exception.getStatus(), exception.getCode(), exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(org.springframework.orm.ObjectOptimisticLockingFailureException.class)
+    ResponseEntity<ApiError> handleVersionConflict(HttpServletRequest request) {
+        return error(HttpStatus.CONFLICT, "EVENT_VERSION_CONFLICT", "Nội dung đã thay đổi. Vui lòng tải lại.", request);
+    }
+
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    ResponseEntity<ApiError> handleInvalidParameter(HttpServletRequest request) {
+        return error(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", "Tham số không hợp lệ", request);
+    }
+
     @ExceptionHandler(ResponseStatusException.class)
     ResponseEntity<ApiError> handleApi(ResponseStatusException exception, HttpServletRequest request) {
         return ResponseEntity.status(exception.getStatusCode()).body(ApiError.of(exception.getStatusCode().value(),
@@ -59,7 +74,20 @@ public class GlobalExceptionHandler implements AuthenticationEntryPoint, AccessD
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
-    ResponseEntity<ApiError> handleConflict(HttpServletRequest request) {
+    ResponseEntity<ApiError> handleConflict(DataIntegrityViolationException exception, HttpServletRequest request) {
+        if (request.getRequestURI().startsWith("/api/admin/")) {
+            for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+                if (cause instanceof org.hibernate.exception.ConstraintViolationException constraint) {
+                    String name = constraint.getConstraintName();
+                    if ("uk_categories_name_normalized".equals(name))
+                        return error(HttpStatus.CONFLICT, "CATEGORY_NAME_ALREADY_EXISTS", "Tên danh mục đã tồn tại", request);
+                    if ("uk_users_email_normalized".equals(name) || "uk_users_email".equals(name))
+                        return error(HttpStatus.CONFLICT, "EMAIL_ALREADY_EXISTS", "Email đã được sử dụng", request);
+                    if ("events_categories_id_fkey".equals(name))
+                        return error(HttpStatus.CONFLICT, "CATEGORY_IN_USE", "Danh mục đang được sử dụng", request);
+                }
+            }
+        }
         return error(HttpStatus.CONFLICT, "DATA_CONFLICT", "Data conflicts with an existing record", request);
     }
 

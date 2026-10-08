@@ -13,6 +13,14 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
 public interface EventRepository extends JpaRepository<Event, Integer> {
+    @EntityGraph(attributePaths = {"category", "organizer"})
+    Page<Event> findByStatus(EventStatus status, Pageable pageable);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select e from Event e where e.id = :eventId")
+    Optional<Event> findForReview(Integer eventId);
+
+    boolean existsByCategoryId(Integer categoryId);
     @EntityGraph(attributePaths = {"venue", "category"})
     @Query("""
             select e from Event e where e.organizer.id = :organizerId
@@ -32,7 +40,8 @@ public interface EventRepository extends JpaRepository<Event, Integer> {
     @EntityGraph(attributePaths = {"venue", "category", "organizer"})
     Optional<Event> findByIdAndOrganizerId(Integer id, Integer organizerId);
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    // Bump the revision even when only guests/tickets change, not scalar event fields.
+    @Lock(LockModeType.PESSIMISTIC_FORCE_INCREMENT)
     @Query("select e from Event e where e.id = :eventId and e.organizer.id = :organizerId")
     Optional<Event> findOwnedForUpdate(Integer eventId, Integer organizerId);
 
