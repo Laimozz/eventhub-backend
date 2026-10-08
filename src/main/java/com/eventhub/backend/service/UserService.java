@@ -5,6 +5,8 @@ import com.eventhub.backend.entity.User;
 import com.eventhub.backend.exception.EmailAlreadyExistsException;
 import com.eventhub.backend.repository.UserRepository;
 import com.eventhub.backend.dto.request.ChangePasswordRequest;
+import com.eventhub.backend.dto.request.UploadAvatarRequest;
+import java.util.UUID;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -24,6 +27,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final EventImageService eventImageService;
 
     @Transactional(readOnly = true)
     public UserDetailDto getUserDetail(Integer userId) {
@@ -118,5 +122,30 @@ public class UserService {
         // 5. Băm mật khẩu mới bằng BCrypt và lưu vào DB thông qua Native SQL
         String hashedNewPassword = passwordEncoder.encode(request.newPassword());
         userRepository.updatePasswordNative(userId, hashedNewPassword);
+    }
+
+    @Transactional
+    public String updateAvatar(UploadAvatarRequest request) {
+        if (request == null || request.userId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "User ID không được để trống");
+        }
+        return updateAvatar(request.userId(), request.file());
+    }
+
+    @Transactional
+    public String updateAvatar(Integer userId, MultipartFile file) {
+        User user = userRepository.findUserByIdNative(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Người dùng không tồn tại"));
+
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File ảnh đại diện không được để trống");
+        }
+
+        EventImageService.PreparedImage prepared = eventImageService.prepare(file);
+        String imageId = "avatar_" + userId + "_" + UUID.randomUUID().toString().replace("-", "");
+        String avatarUrl = eventImageService.upload(prepared, "eventhub/avatars", imageId);
+
+        userRepository.updateAvatarUrlNative(userId, avatarUrl);
+        return avatarUrl;
     }
 }

@@ -8,6 +8,9 @@ import com.eventhub.backend.exception.EmailAlreadyExistsException;
 import com.eventhub.backend.repository.UserRepository;
 import java.time.LocalDate;
 import java.util.Optional;
+import com.eventhub.backend.dto.request.UploadAvatarRequest;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,6 +44,9 @@ class UserServiceTest {
 
     @Mock
     private PasswordEncoder passwordEncoder;
+
+    @Mock
+    private EventImageService eventImageService;
 
     @InjectMocks
     private UserService userService;
@@ -643,6 +649,104 @@ class UserServiceTest {
                     });
 
             verify(userRepository, never()).updatePasswordNative(anyInt(), anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("updateAvatar() tests")
+    class UpdateAvatarTests {
+
+        @Test
+        @DisplayName("Should successfully upload avatar and update database with native query")
+        void updateAvatar_WhenValid_ShouldUploadAndReturnUrl() {
+            MockMultipartFile mockFile = new MockMultipartFile(
+                    "file", "avatar.jpg", "image/jpeg", "test image content".getBytes()
+            );
+            EventImageService.PreparedImage prepared = new EventImageService.PreparedImage("test image content".getBytes(), "JPEG");
+
+            when(userRepository.findUserByIdNative(1)).thenReturn(Optional.of(sampleUser));
+            when(eventImageService.prepare(mockFile)).thenReturn(prepared);
+            when(eventImageService.upload(eq(prepared), eq("eventhub/avatars"), anyString()))
+                    .thenReturn("https://res.cloudinary.com/dnumysqsn/image/upload/v123/avatar.jpg");
+
+            String result = userService.updateAvatar(1, mockFile);
+
+            assertThat(result).isEqualTo("https://res.cloudinary.com/dnumysqsn/image/upload/v123/avatar.jpg");
+            verify(userRepository).updateAvatarUrlNative(1, "https://res.cloudinary.com/dnumysqsn/image/upload/v123/avatar.jpg");
+        }
+
+        @Test
+        @DisplayName("Should support UploadAvatarRequest DTO successfully")
+        void updateAvatar_WithDto_ShouldUploadAndReturnUrl() {
+            MockMultipartFile mockFile = new MockMultipartFile(
+                    "file", "avatar.png", "image/png", "png image content".getBytes()
+            );
+            EventImageService.PreparedImage prepared = new EventImageService.PreparedImage("png image content".getBytes(), "PNG");
+
+            when(userRepository.findUserByIdNative(1)).thenReturn(Optional.of(sampleUser));
+            when(eventImageService.prepare(mockFile)).thenReturn(prepared);
+            when(eventImageService.upload(eq(prepared), eq("eventhub/avatars"), anyString()))
+                    .thenReturn("https://res.cloudinary.com/dnumysqsn/image/upload/v456/avatar.png");
+
+            UploadAvatarRequest request = new UploadAvatarRequest(1, mockFile);
+            String result = userService.updateAvatar(request);
+
+            assertThat(result).isEqualTo("https://res.cloudinary.com/dnumysqsn/image/upload/v456/avatar.png");
+            verify(userRepository).updateAvatarUrlNative(1, "https://res.cloudinary.com/dnumysqsn/image/upload/v456/avatar.png");
+        }
+
+        @Test
+        @DisplayName("Should throw 404 NOT_FOUND when user does not exist")
+        void updateAvatar_WhenUserNotFound_ShouldThrow404() {
+            MockMultipartFile mockFile = new MockMultipartFile(
+                    "file", "avatar.jpg", "image/jpeg", "content".getBytes()
+            );
+            when(userRepository.findUserByIdNative(999)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> userService.updateAvatar(999, mockFile))
+                    .isInstanceOfSatisfying(ResponseStatusException.class, ex -> {
+                        assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+                        assertThat(ex.getReason()).contains("Người dùng không tồn tại");
+                    });
+
+            verify(userRepository, never()).updateAvatarUrlNative(anyInt(), anyString());
+        }
+
+        @Test
+        @DisplayName("Should throw 400 BAD_REQUEST when file is null or empty")
+        void updateAvatar_WhenFileEmpty_ShouldThrow400() {
+            when(userRepository.findUserByIdNative(1)).thenReturn(Optional.of(sampleUser));
+
+            MockMultipartFile emptyFile = new MockMultipartFile("file", new byte[0]);
+
+            assertThatThrownBy(() -> userService.updateAvatar(1, emptyFile))
+                    .isInstanceOfSatisfying(ResponseStatusException.class, ex -> {
+                        assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                        assertThat(ex.getReason()).contains("File ảnh đại diện không được để trống");
+                    });
+
+            assertThatThrownBy(() -> userService.updateAvatar(1, (MultipartFile) null))
+                    .isInstanceOfSatisfying(ResponseStatusException.class, ex -> {
+                        assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                        assertThat(ex.getReason()).contains("File ảnh đại diện không được để trống");
+                    });
+
+            verify(userRepository, never()).updateAvatarUrlNative(anyInt(), anyString());
+        }
+
+        @Test
+        @DisplayName("Should throw 400 BAD_REQUEST when UploadAvatarRequest is invalid")
+        void updateAvatar_WhenRequestInvalid_ShouldThrow400() {
+            assertThatThrownBy(() -> userService.updateAvatar((UploadAvatarRequest) null))
+                    .isInstanceOfSatisfying(ResponseStatusException.class, ex -> {
+                        assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    });
+
+            UploadAvatarRequest requestWithNullUser = new UploadAvatarRequest(null, null);
+            assertThatThrownBy(() -> userService.updateAvatar(requestWithNullUser))
+                    .isInstanceOfSatisfying(ResponseStatusException.class, ex -> {
+                        assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    });
         }
     }
 }

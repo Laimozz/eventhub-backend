@@ -44,7 +44,7 @@ public record UserDetailDto(
                 user.getStatus(),
                 user.getDateOfBirth(),
                 user.getGender(),
-                null
+                user.getAvatarUrl()
         );
     }
 }

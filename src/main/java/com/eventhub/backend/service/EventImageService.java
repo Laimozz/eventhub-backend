@@ -84,16 +84,20 @@ public class EventImageService {
     }
 
     public String upload(PreparedImage image, String imageId) {
+        return upload(image, "eventhub/events", imageId);
+    }
+
+    public String upload(PreparedImage image, String folder, String imageId) {
         verifyConfiguration();
         var body = new LinkedMultiValueMap<String, Object>();
-        String filename = image.format().equals("jpeg") ? "event.jpg" : "event.png";
+        String filename = image.format().equals("jpeg") ? "image.jpg" : "image.png";
         body.add("file", new ByteArrayResource(image.bytes()) {
             @Override
             public String getFilename() {
                 return filename;
             }
         });
-        body.add("folder", "eventhub/events");
+        body.add("folder", folder);
         body.add("public_id", imageId);
         body.add("overwrite", "false");
         CloudinaryResponse response;
@@ -119,9 +123,13 @@ public class EventImageService {
     }
 
     public void delete(String imageId) {
+        delete("eventhub/events", imageId);
+    }
+
+    public void delete(String folder, String imageId) {
         verifyConfiguration();
         var body = new LinkedMultiValueMap<String, String>();
-        body.add("public_id", "eventhub/events/" + imageId);
+        body.add("public_id", folder + "/" + imageId);
         body.add("invalidate", "true");
         try {
             var response = client.post().uri("https://api.cloudinary.com/v1_1/{cloudName}/image/destroy", cloudName)

@@ -34,4 +34,8 @@ public interface UserRepository extends JpaRepository<User, Integer> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = "UPDATE users SET password = :password, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'UTC' WHERE id = :id", nativeQuery = true)
     int updatePasswordNative(@Param("id") Integer id, @Param("password") String password);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "UPDATE users SET avatar_url = :avatarUrl, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'UTC' WHERE id = :id", nativeQuery = true)
+    int updateAvatarUrlNative(@Param("id") Integer id, @Param("avatarUrl") String avatarUrl);
 }

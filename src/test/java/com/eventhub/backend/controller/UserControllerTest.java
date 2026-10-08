@@ -29,6 +29,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.springframework.mock.web.MockMultipartFile;
+import com.eventhub.backend.dto.request.UploadAvatarRequest;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -259,5 +262,41 @@ class UserControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.errors.newPassword").value("Mật khẩu mới phải từ 8 đến 72 ký tự"));
+    }
+
+    @Test
+    @DisplayName("POST /api/users/me/avatar should return 200 and avatarUrl")
+    void uploadMyAvatar_WhenValidFile_ShouldReturn200AndAvatarUrl() throws Exception {
+        MockMultipartFile mockFile = new MockMultipartFile(
+                "file", "avatar.jpg", "image/jpeg", "image content".getBytes()
+        );
+
+        when(userService.updateAvatar(any(UploadAvatarRequest.class)))
+                .thenReturn("https://res.cloudinary.com/dnumysqsn/image/upload/v123/avatar.jpg");
+
+        mockMvc.perform(multipart("/api/users/me/avatar").file(mockFile))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.avatarUrl").value("https://res.cloudinary.com/dnumysqsn/image/upload/v123/avatar.jpg"))
+                .andExpect(jsonPath("$.message").value("Cập nhật ảnh đại diện thành công"));
+
+        verify(userService).updateAvatar(any(UploadAvatarRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST /api/users/avatar with userId param should return 200 and avatarUrl")
+    void uploadAvatar_WithUserIdParam_ShouldReturn200() throws Exception {
+        MockMultipartFile mockFile = new MockMultipartFile(
+                "file", "avatar.png", "image/png", "png image content".getBytes()
+        );
+
+        when(userService.updateAvatar(any(UploadAvatarRequest.class)))
+                .thenReturn("https://res.cloudinary.com/dnumysqsn/image/upload/v456/avatar.png");
+
+        mockMvc.perform(multipart("/api/users/avatar").file(mockFile).param("userId", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.avatarUrl").value("https://res.cloudinary.com/dnumysqsn/image/upload/v456/avatar.png"))
+                .andExpect(jsonPath("$.message").value("Cập nhật ảnh đại diện thành công"));
+
+        verify(userService).updateAvatar(any(UploadAvatarRequest.class));
     }
 }

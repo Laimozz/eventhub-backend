@@ -65,6 +65,9 @@ public class User {
     @Column(name = "gender", length = 20)
     private String gender;
 
+    @Column(name = "avatar_url", length = 500)
+    private String avatarUrl;
+
     public boolean isActive() {
         return "ACTIVE".equals(status);
     }
