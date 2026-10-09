@@ -74,6 +74,7 @@ public class SecurityConfig {
                                 "/api/auth/refresh", "/api/auth/logout").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/public/events/**", "/api/categories").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/events").hasRole("ORGANIZER")
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(auth, cookies, errors),
                         UsernamePasswordAuthenticationFilter.class)

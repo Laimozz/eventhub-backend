@@ -76,7 +76,7 @@ class AuthIntegrationTests {
         assertThat(user.getRole()).isEqualTo(Role.CUSTOMER);
         assertThat(user.getPassword()).startsWith("$2").isNotEqualTo(PASSWORD);
         assertThat(passwords.matches(PASSWORD, user.getPassword())).isTrue();
-        assertThat(json.readTree(result.getResponse().getContentAsString()).size()).isEqualTo(1);
+        assertThat(result.getResponse().getContentAsString()).isEqualTo("Registration successful");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM refresh_tokens WHERE users_id = ?",
                 Integer.class, user.getId())).isZero();
         assertThat(result.getRequest().getSession(false)).isNull();
@@ -117,8 +117,7 @@ class AuthIntegrationTests {
                         .content(json.writeValueAsString(Map.of("email", email, "password", PASSWORD,
                                 "fullName", "Test user", "role", role, "roles", List.of("ADMIN", "STAFF")))))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.message").value("Registration successful"))
-                .andExpect(jsonPath("$.role").doesNotExist())
+                .andExpect(content().string("Registration successful"))
                 .andExpect(header().doesNotExist("Set-Cookie"));
         User user = users.findByNormalizedEmail(email).orElseThrow();
         userIds.add(user.getId());
@@ -367,7 +366,7 @@ class AuthIntegrationTests {
         MvcResult result = mvc.perform(post("/api/auth/register").with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content(registrationJson(email)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.message").value("Registration successful"))
+                .andExpect(content().string("Registration successful"))
                 .andExpect(header().doesNotExist("Set-Cookie")).andReturn();
         userIds.add(users.findByNormalizedEmail(email.strip().toLowerCase(java.util.Locale.ROOT)).orElseThrow().getId());
         return result;

@@ -30,6 +30,10 @@ import org.hibernate.type.SqlTypes;
 @Table(name = "events")
 public class Event {
 
+    @jakarta.persistence.Version
+    @Column(nullable = false)
+    private long version;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
