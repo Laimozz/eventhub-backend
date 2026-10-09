@@ -21,6 +21,11 @@ X-CSRF-Protection: 1
 | Hỗ trợ UC02 | Cấp lại token | `POST /api/auth/refresh` | Required — refresh token | `200 OK` |
 | UC03 | Đăng xuất | `POST /api/auth/logout` | Public — cookie tùy chọn | `204 No Content` |
 | UC19 | Tạo sự kiện | `POST /api/events` | Required — access token, role `ORGANIZER` | `201 Created` |
+| UC06 | Xem danh sách sự kiện | `GET /api/public/events` | Public | `200 OK` |
+| UC07 | Tìm kiếm sự kiện | `GET /api/public/events` | Public | `200 OK` |
+| UC08 | Lọc sự kiện | `GET /api/public/events` | Public | `200 OK` |
+| UC09 | Xem chi tiết sự kiện | `GET /api/public/events/{eventId}` | Public | `200 OK` |
+| Hỗ trợ UC08, UC19 | Lấy danh sách danh mục | `GET /api/categories` | Public | `200 OK` |
 
 ## 3. Đăng ký tài khoản
 
@@ -395,3 +400,150 @@ Query danh sách: `page` bắt đầu từ 0 (mặc định 0), `size` từ 1–
 
 Không xóa sự kiện, booking hoặc vé; không đánh dấu `CANCELED`, hoàn tiền hay triển khai thao tác duyệt của Admin trong endpoint này.
 
+## 11. Xem danh sách sự kiện
+
+| Mục | Nội dung |
+| --- | --- |
+| **Use Case liên quan** | UC06 (Xem danh sách sự kiện) |
+| **Tên API** | Xem danh sách sự kiện |
+| **Method + Endpoint** | `GET /api/public/events` |
+| **Authentication** | **Public** |
+| **Role được phép sử dụng** | Guest, Customer, Staff, Organizer, Admin |
+| **Path Parameters** | Không có |
+| **Query Parameters** | `page` (integer, mặc định 0): Trang hiện tại.<br>`size` (integer, mặc định 9): Số phần tử trên mỗi trang. |
+| **Request Body** | Không có |
+
+### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+{
+  "content": [
+    {
+      "id": 1,
+      "name": "Anh trai say hi",
+      "thumbnailImageUrl": "https://picsum.photos/400/300",
+      "startTime": "2026-09-24T06:00:00",
+      "endTime": "2026-09-24T10:00:00",
+      "city": "Hà Nội",
+      "startingPrice": 300000.00
+    }
+  ],
+  "page": 0,
+  "size": 9,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+**Trạng thái/Error chính:**
+- `200 OK`: Danh sách trả về chỉ bao gồm các sự kiện có trạng thái `APPROVED` hoặc `ONGOING`. Nếu không có, mảng `content` rỗng.
+
+## 12. Tìm kiếm sự kiện
+
+| Mục | Nội dung |
+| --- | --- |
+| **Use Case liên quan** | UC07 (Tìm kiếm sự kiện) |
+| **Tên API** | Tìm kiếm sự kiện |
+| **Method + Endpoint** | `GET /api/public/events` |
+| **Authentication** | **Public** |
+| **Role được phép sử dụng** | Guest, Customer, Staff, Organizer, Admin |
+| **Path Parameters** | Không có |
+| **Query Parameters** | `search` (string, bắt buộc): Từ khóa tìm kiếm theo tên sự kiện.<br>`page` (integer, mặc định 0): Trang hiện tại.<br>`size` (integer, mặc định 9): Số phần tử trên mỗi trang. |
+| **Request Body** | Không có |
+
+*(Response tương tự như mục 11)*
+
+## 13. Lọc sự kiện
+
+| Mục | Nội dung |
+| --- | --- |
+| **Use Case liên quan** | UC08 (Lọc sự kiện) |
+| **Tên API** | Lọc sự kiện |
+| **Method + Endpoint** | `GET /api/public/events` |
+| **Authentication** | **Public** |
+| **Role được phép sử dụng** | Guest, Customer, Staff, Organizer, Admin |
+| **Path Parameters** | Không có |
+| **Query Parameters** | `fromDate` (datetime ISO, tùy chọn): Thời gian bắt đầu.<br>`toDate` (datetime ISO, tùy chọn): Thời gian kết thúc.<br>`categoryId` (integer, tùy chọn): ID của danh mục.<br>`city` (string, tùy chọn): Tên thành phố.<br>`page` (integer, mặc định 0): Trang hiện tại.<br>`size` (integer, mặc định 9): Số phần tử trên trang. |
+| **Request Body** | Không có |
+
+*(Response tương tự như mục 11)*
+
+## 14. Xem chi tiết sự kiện
+
+| Mục | Nội dung |
+| --- | --- |
+| **Use Case liên quan** | UC09 |
+| **Tên API** | Xem chi tiết sự kiện |
+| **Method + Endpoint** | `GET /api/public/events/{eventId}` |
+| **Authentication** | **Public** |
+| **Role được phép sử dụng** | Guest, Customer, Staff, Organizer, Admin |
+| **Path Parameters** | `eventId` (integer): ID của sự kiện. |
+| **Query Parameters** | Không có |
+| **Request Body** | Không có |
+
+### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+{
+  "id": 1,
+  "name": "Anh trai say hi",
+  "description": "Show âm nhạc bùng nổ",
+  "thumbnailImageUrl": "https://picsum.photos/400/300",
+  "bannerImageUrl": "https://picsum.photos/1200/400",
+  "imageZoneUrl": "https://picsum.photos/800/600",
+  "startTime": "2026-09-24T06:00:00",
+  "endTime": "2026-09-24T10:00:00",
+  "organizerName": "VieON Channel",
+  "categoryName": "Âm nhạc",
+  "venue": {
+    "city": "Hà Nội",
+    "address": "Sân Vận Động Quốc Gia Mỹ Đình"
+  },
+  "startingPrice": 300000.00,
+  "suggestedEvents": [
+    {
+      "id": 2,
+      "name": "LOALOA SHOW",
+      "thumbnailImageUrl": "https://picsum.photos/400/300",
+      "startTime": "2026-09-26T08:00:00",
+      "endTime": "2026-09-26T12:00:00",
+      "city": "Hà Nội",
+      "startingPrice": 300000.00
+    }
+  ]
+}
+```
+
+**Trạng thái/Error chính:**
+- `404 Not Found`: Sự kiện không tồn tại hoặc chưa được duyệt (`PENDING_APPROVAL`, `CANCELED`,...).
+
+## 15. Lấy danh sách danh mục (Cập nhật cho Public)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Use Case liên quan** | Hỗ trợ UC08 (Lọc sự kiện), UC19 (Tạo sự kiện) |
+| **Tên API** | Lấy danh sách danh mục |
+| **Method + Endpoint** | `GET /api/categories` |
+| **Authentication** | **Public** |
+| **Role được phép sử dụng** | Guest, Customer, Staff, Organizer, Admin |
+| **Path Parameters** | Không có |
+| **Query Parameters** | Không có |
+| **Request Body** | Không có |
+
+### Response mẫu
+
+**Thành công — `200 OK`:**
+
+```json
+[
+  {
+    "id": 1,
+    "name": "Âm nhạc",
+    "description": "Sự kiện âm nhạc"
+  }
+]
+```

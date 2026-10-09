@@ -418,4 +418,59 @@ public class EventService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Total ticket quantity exceeds venue capacity");
         }
     }
+
+    @Transactional(readOnly = true)
+    public com.eventhub.backend.dto.response.PublicEventListResponse listPublicEvents(
+            Integer categoryId, String city, LocalDateTime fromDate, LocalDateTime toDate, String search, int page, int size) {
+        if (page < 0 || size < 1 || size > 50 || (search != null && search.length() > 255)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid pagination or search");
+        }
+        String pattern = search == null ? "%%" : "%" + search.strip().toLowerCase(java.util.Locale.ROOT)
+                .replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
+        String lowerCity = (city == null || city.isBlank()) ? null : city.trim().toLowerCase(java.util.Locale.ROOT);
+        
+        List<EventStatus> statuses = List.of(EventStatus.APPROVED, EventStatus.ONGOING);
+        var pagedResult = events.findPublicEvents(categoryId, lowerCity, fromDate, toDate, pattern, statuses, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "startTime")));
+        return new com.eventhub.backend.dto.response.PublicEventListResponse(
+                pagedResult.getContent(),
+                pagedResult.getNumber(),
+                pagedResult.getSize(),
+                pagedResult.getTotalElements(),
+                pagedResult.getTotalPages()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public com.eventhub.backend.dto.response.PublicEventDetailResponse getPublicEvent(Integer eventId) {
+        Event event = events.findById(eventId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Event not found"));
+                
+        if (event.getStatus() != EventStatus.APPROVED && event.getStatus() != EventStatus.ONGOING && event.getStatus() != EventStatus.COMPLETED) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Event not available");
+        }
+
+        List<EventStatus> statuses = List.of(EventStatus.APPROVED, EventStatus.ONGOING);
+        List<com.eventhub.backend.dto.response.PublicEventSummaryResponse> suggested = events.findSuggestedEvents(eventId, statuses, PageRequest.of(0, 10));
+
+        java.math.BigDecimal minPrice = ticketTypes.findByEventIdOrderByIdAsc(eventId).stream()
+                .map(TicketType::getPrice)
+                .min(java.util.Comparator.naturalOrder())
+                .orElse(null);
+
+        return new com.eventhub.backend.dto.response.PublicEventDetailResponse(
+                event.getId(),
+                event.getName(),
+                event.getDescription(),
+                event.getThumbnailImageUrl(),
+                event.getBannerImageUrl(),
+                event.getImageZoneUrl(),
+                event.getStartTime(),
+                event.getEndTime(),
+                event.getOrganizer().getFullName() != null ? event.getOrganizer().getFullName() : event.getOrganizer().getEmail(),
+                event.getCategory().getName(),
+                new com.eventhub.backend.dto.response.PublicEventDetailResponse.Venue(event.getVenue().getCity(), event.getVenue().getAddress()),
+                minPrice,
+                suggested
+        );
+    }
 }

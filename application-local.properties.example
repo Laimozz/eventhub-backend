@@ -1,10 +1,10 @@
 # Copy to application-local.properties (ignored by Git), then set your credentials.
 spring.datasource.url=jdbc:postgresql://localhost:5432/eventhub_db
 spring.datasource.username=postgres
-spring.datasource.password=
+spring.datasource.password=30032004
 
 # Generate a random Base64 key containing at least 32 bytes, then paste it here.
-app.auth.jwt-secret=
+app.auth.jwt-secret=VGhpc0lzQVNlY3VyZUpXVFNlY3JldEtleUZvckRldmVsb3BtZW50MTIzNDU2Nzg5
 app.auth.access-token-ttl=15m
 app.auth.refresh-token-ttl=7d
 # Development over HTTP only. Use true with HTTPS in deployed environments.
