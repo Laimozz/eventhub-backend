@@ -353,8 +353,8 @@ class DatabaseIntegrationTests {
                     + "VALUES (1, 'migration@example.invalid', 'test-hash', 'CUSTOMER', 'ACTIVE')");
             Flyway upgraded = Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema)
                     .defaultSchema(schema).load();
-            assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(3);
-            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("4");
+            assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(4);
+            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("5");
             assertThat(upgraded.info().pending()).isEmpty();
             jdbc.update("UPDATE " + schema + ".users SET role = 'STAFF' WHERE id = 1");
             assertThat(jdbc.queryForObject("SELECT role FROM " + schema + ".users WHERE id = 1", String.class))
