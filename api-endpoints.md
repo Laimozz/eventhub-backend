@@ -1247,3 +1247,7 @@ Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông
 | `403` | `FORBIDDEN` | Sai role. |
 
 Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+## API tài chính Admin UC37–UC42
+
+Hợp đồng mới được mô tả riêng tại [admin-finance-api.md](admin-finance-api.md), gồm thống kê, list/detail/approve/reject yêu cầu rút tiền và đọc đối soát sự kiện CANCELED. Các endpoint UC31–UC36 giữ nguyên. Chưa có API gửi hoàn tiền hoặc webhook vì thiếu hợp đồng tích hợp.
