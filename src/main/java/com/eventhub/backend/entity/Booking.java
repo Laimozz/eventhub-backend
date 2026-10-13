@@ -18,6 +18,8 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -31,10 +33,12 @@ public class Booking {
     private Integer id;
 
     @Setter(AccessLevel.NONE)
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @Setter(AccessLevel.NONE)
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -52,6 +56,7 @@ public class Booking {
     @Column(name = "status", nullable = false)
     private String status;
 
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "expired_at", nullable = false)
     private LocalDateTime expiredAt;
 

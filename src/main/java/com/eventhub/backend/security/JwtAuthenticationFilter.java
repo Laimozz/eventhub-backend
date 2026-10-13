@@ -38,6 +38,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
         String path = request.getRequestURI().substring(request.getContextPath().length());
+        // VNPay callbacks authenticate by their signature and must also work with an expired browser cookie.
+        if ("GET".equals(request.getMethod()) && Set.of("/api/payments/vnpay/ipn", "/api/payments/vnpay/return").contains(path)) {
+            chain.doFilter(request, response);
+            return;
+        }
         if ("POST".equals(request.getMethod()) && PUBLIC_AUTH_PATHS.contains(path)) {
             chain.doFilter(request, response);
             return;

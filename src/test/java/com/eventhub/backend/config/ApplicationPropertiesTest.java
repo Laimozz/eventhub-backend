@@ -46,6 +46,30 @@ class ApplicationPropertiesTest {
                 .run(context -> assertThat(context).hasFailed());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"0s", "-1m", "59s", "31m", "90500ms"})
+    void rejectsInvalidBookingHoldLifetime(String value) {
+        runner.withPropertyValues("app.booking.hold-ttl=" + value)
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"-1s", "301s", "500ms"})
+    void rejectsInvalidIpnGracePeriod(String value) {
+        runner.withPropertyValues("app.booking.ipn-grace-period=" + value)
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void bindsIpnGracePeriodAndAllowsDisablingIt() {
+        runner.run(context -> assertThat(context.getBean(ApplicationProperties.class).getBooking().getIpnGracePeriod())
+                .isEqualTo(Duration.ofSeconds(120)));
+        runner.withPropertyValues("app.booking.ipn-grace-period=0s").run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(ApplicationProperties.class).getBooking().getIpnGracePeriod()).isZero();
+        });
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     @EnableConfigurationProperties(ApplicationProperties.class)
     static class PropertiesConfiguration {

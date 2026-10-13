@@ -18,6 +18,8 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -33,6 +35,7 @@ public class Payment {
     private Integer id;
 
     @Setter(AccessLevel.NONE)
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -43,6 +46,12 @@ public class Payment {
     @Column(name = "transaction_id", nullable = false)
     private String transactionId;
 
+    @Column(name = "gateway_transaction_id")
+    private String gatewayTransactionId;
+
+    @Column(name = "response_code", length = 2)
+    private String responseCode;
+
     @Column(name = "payment_method", nullable = true)
     private String paymentMethod;
 
@@ -52,6 +61,7 @@ public class Payment {
     @Column(name = "status", nullable = true)
     private String status;
 
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "paid_at", nullable = true)
     private LocalDateTime paidAt;
 
