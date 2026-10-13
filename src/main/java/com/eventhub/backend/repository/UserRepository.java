@@ -18,6 +18,14 @@ public interface UserRepository extends JpaRepository<User, Integer> {
             org.springframework.data.domain.Pageable pageable);
     Optional<User> findFirstByRoleAndStatusOrderByIdAsc(Role role, String status);
 
+    java.util.List<User> findByRoleAndStatus(Role role, String status);
+
+    @Query("""
+            select u from User u where u.status = 'ACTIVE' and u.role = com.eventhub.backend.enums.Role.CUSTOMER
+                and exists (select b.id from Booking b where b.user = u and b.event.id = :eventId and b.status = 'PAID')
+            """)
+    java.util.List<User> findEventNotificationRecipients(Integer eventId);
+
     @Query("select u from User u where lower(trim(u.email)) = :email")
     Optional<User> findByNormalizedEmail(String email);
 

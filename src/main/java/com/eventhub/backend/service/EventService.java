@@ -7,7 +7,6 @@ import com.eventhub.backend.dto.response.EventListResponse;
 import com.eventhub.backend.dto.response.CategoryResponse;
 import com.eventhub.backend.entity.Event;
 import com.eventhub.backend.entity.EventGuest;
-import com.eventhub.backend.entity.Notification;
 import com.eventhub.backend.entity.TicketType;
 import com.eventhub.backend.entity.Venue;
 import com.eventhub.backend.enums.EventStatus;
@@ -16,7 +15,6 @@ import com.eventhub.backend.repository.CategoryRepository;
 import com.eventhub.backend.repository.BookingItemRepository;
 import com.eventhub.backend.repository.EventGuestRepository;
 import com.eventhub.backend.repository.EventRepository;
-import com.eventhub.backend.repository.NotificationRepository;
 import com.eventhub.backend.repository.TicketTypeRepository;
 import com.eventhub.backend.repository.UserRepository;
 import com.eventhub.backend.repository.VenueRepository;
@@ -51,7 +49,7 @@ public class EventService {
     private final CategoryRepository categories;
     private final TicketTypeRepository ticketTypes;
     private final EventGuestRepository guests;
-    private final NotificationRepository notifications;
+    private final NotificationService notifications;
     private final UserRepository users;
     private final Clock clock;
     private final EventImageService images;
@@ -110,6 +108,9 @@ public class EventService {
         var savedTickets = ticketTypes.findForUpdate(eventId);
         savedTickets.forEach(ticket -> ticket.setStatus("INACTIVE"));
         notifyAdmin(event, "Có yêu cầu hủy sự kiện", "EVENT_PENDING_CANCELLATION", "\" vừa được gửi yêu cầu hủy.");
+        notifications.notifyEventParticipants(eventId, "Sự kiện có yêu cầu hủy",
+                "Sự kiện #" + eventId + " đang chờ xét duyệt yêu cầu hủy. Lý do: " + event.getCancelReason(),
+                "EVENT_PENDING_CANCELLATION");
         events.flush();
         return EventResponse.from(event, savedTickets, guests.findByEventIdOrderByIdAsc(eventId), LocalDateTime.now(clock));
     }
@@ -223,6 +224,8 @@ public class EventService {
         guests.saveAll(savedGuests);
         notifyAdmin(event, "Có sự kiện cập nhật chờ duyệt", "EVENT_PENDING_APPROVAL",
                 "\" vừa được cập nhật và gửi lên chờ duyệt.");
+        notifications.notifyEventParticipants(eventId, "Thông tin sự kiện được cập nhật",
+                "Sự kiện #" + eventId + " vừa được cập nhật và đang chờ xét duyệt lại.", "EVENT_UPDATED");
         events.flush();
         var urls = uploadImages(prepared);
         if (urls.containsKey("bannerImage")) event.setBannerImageUrl(urls.get("bannerImage"));
@@ -376,7 +379,7 @@ public class EventService {
     }
 
     private void notifyAdmin(Event event, String title, String type, String suffix) {
-        users.findFirstByRoleAndStatusOrderByIdAsc(Role.ADMIN, "ACTIVE").ifPresent(admin -> {
+        users.findByRoleAndStatus(Role.ADMIN, "ACTIVE").forEach(admin -> {
             String prefix = "Sự kiện \"";
             String eventName = event.getName();
             int maxNameLength = 255 - prefix.length() - suffix.length();
@@ -384,13 +387,7 @@ public class EventService {
             if (eventName.codePointCount(0, eventName.length()) > maxNameLength) {
                 eventName = eventName.substring(0, eventName.offsetByCodePoints(0, maxNameLength - 3)) + "...";
             }
-            Notification notification = new Notification();
-            notification.setUser(admin);
-            notification.setTitle(title);
-            notification.setContent(prefix + eventName + suffix);
-            notification.setType(type);
-            notification.setRead(false);
-            notifications.save(notification);
+            notifications.create(admin, title, prefix + eventName + suffix, type);
         });
     }
 
