@@ -22,6 +22,48 @@ public class ApplicationProperties {
     @NotNull
     private Auth auth = new Auth();
 
+    @Valid
+    @NotNull
+    private Booking booking = new Booking();
+
+    @Valid
+    @NotNull
+    private Vnpay vnpay = new Vnpay();
+
+    @Getter
+    @Setter
+    public static class Booking {
+        @NotNull
+        private Duration holdTtl = Duration.ofMinutes(5);
+
+        @NotNull
+        private Duration ipnGracePeriod = Duration.ofSeconds(120);
+
+        @AssertTrue(message = "Booking hold must be between 1 and 30 minutes, in whole seconds")
+        public boolean isHoldTtlValid() {
+            return holdTtl != null && holdTtl.getNano() == 0
+                    && holdTtl.getSeconds() >= 60 && holdTtl.getSeconds() <= 500;
+        }
+
+        @AssertTrue(message = "IPN grace period must be between 0 and 300 seconds, in whole seconds")
+        public boolean isIpnGracePeriodValid() {
+            return ipnGracePeriod != null && ipnGracePeriod.getNano() == 0
+                    && ipnGracePeriod.getSeconds() >= 0 && ipnGracePeriod.getSeconds() <= 300;
+        }
+    }
+
+    @Getter
+    @Setter
+    public static class Vnpay {
+        // Empty credentials disable checkout without preventing unrelated features from starting.
+        private String tmnCode = "";
+        private String hashSecret = "";
+        @NotBlank
+        private String paymentUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
+        @NotBlank
+        private String returnUrl = "http://localhost:5173/customer/payment-result";
+    }
+
     @Getter
     @Setter
     public static class Auth {

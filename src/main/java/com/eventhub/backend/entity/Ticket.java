@@ -17,6 +17,8 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Setter
@@ -33,6 +35,7 @@ public class Ticket {
     private Integer id;
 
     @Setter(AccessLevel.NONE)
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -53,6 +56,7 @@ public class Ticket {
     @Column(name = "status", nullable = false)
     private String status;
 
+    @JdbcTypeCode(SqlTypes.LOCAL_DATE_TIME)
     @Column(name = "checked_in_at", nullable = true)
     private LocalDateTime checkedInAt;
 
