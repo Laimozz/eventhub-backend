@@ -1182,7 +1182,7 @@ Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở m�
 
 ### 11.12. Transaction, version và thông báo xét duyệt
 
-Quyết định, trạng thái vé và bản ghi `notifications` được lưu trong cùng transaction. Lưu thông báo lỗi thì rollback toàn bộ; không có gửi email hoặc tác vụ delivery ngoài DB. Duyệt/từ chối lặp hoặc đồng thời chỉ một quyết định thành công, một thông báo.
+Quyết định, trạng thái vé và bản ghi `notifications` được lưu trong cùng transaction. Lưu thông báo lỗi thì rollback toàn bộ. Sau commit, backend đẩy SSE đến các phiên web của người nhận. Duyệt/từ chối lặp hoặc đồng thời chỉ một quyết định thành công; mỗi người nhận được một thông báo.
 
 Event dùng `@Version`. Organizer sửa/hủy dùng `PESSIMISTIC_FORCE_INCREMENT`, bảo đảm thay đổi chỉ vé/khách mời cũng tăng version. Admin đọc/xử lý khóa cùng bản ghi, kiểm tra `PENDING_APPROVAL` rồi so version. Khi nhận `404`/`409`, frontend chặn quyết định tiếp cho đến khi đọc lại hồ sơ. Form giữ dữ liệu khi lỗi có thể thử lại, chặn gửi lặp; hủy dialog không gọi API.
 
@@ -1191,13 +1191,13 @@ Event dùng `@Version`. Organizer sửa/hủy dùng `PESSIMISTIC_FORCE_INCREMENT
 V4 thêm version mặc định 0, trạng thái REJECTED và unique index tên danh mục. Không chỉnh V1–V3. Nếu dữ liệu đang có tên trùng sau chuẩn hóa, migration dừng; cần xử lý dữ liệu theo quyết định của nhóm, không tự gộp/xóa.
 AdminIntegrationTests kiểm tra security, tạo user/hash, khóa phiên, danh mục, version, tranh chấp quyết định, rollback thông báo và giới hạn dữ liệu người nhận. Test PostgreSQL chạy trong môi trường riêng theo README.
 
-## 12. Organizer đọc thông báo (Hỗ trợ UC35–36)
+## 12. Thông báo trên web (Admin, Organizer, Customer)
 
 | Mục | Nội dung |
 | --- | --- |
 | **Method + Endpoint** | `GET /api/notifications` |
 | **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
-| **Role được phép sử dụng** | `ORGANIZER` |
+| **Role được phép sử dụng** | `ADMIN`, `ORGANIZER`, `CUSTOMER` |
 | **Path Parameters** | Không có. |
 | **Query Parameters** | `page` (integer, tùy chọn, mặc định 0, không âm), `pageSize` (integer, tùy chọn, mặc định 20, từ 1–100). |
 
@@ -1210,14 +1210,6 @@ Không có.
 **Thành công — `200 OK`:**
 
 ```json
-[
-  {
-    "id": 1,
-    "name": "Âm nhạc",
-    "description": "Sự kiện âm nhạc"
-  }
-]
-```
 {
   "items": [
     {
@@ -1236,7 +1228,29 @@ Không có.
 }
 ```
 
-Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông báo của tài khoản đang đăng nhập, sắp xếp ID giảm dần. Type xét duyệt là `EVENT_APPROVED`/`EVENT_REJECTED`. Danh sách rỗng trả `200` với `items: []`. Endpoint chỉ đọc, chưa đánh dấu thông báo đã đọc; không gửi email.
+Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông báo của tài khoản đang đăng nhập, sắp xếp ID giảm dần. Danh sách rỗng trả `200` với `items: []`; `createdAt` là UTC.
+
+### Trạng thái đọc và SSE
+
+| Method + Endpoint | Kết quả |
+| --- | --- |
+| `GET /api/notifications/unread-count` | `200`, JSON number là số chưa đọc của tài khoản hiện tại. |
+| `PATCH /api/notifications/{id}/read` | `204`, đánh dấu đã đọc; gọi lại vẫn thành công. ID không tồn tại hoặc thuộc tài khoản khác trả `404 NOTIFICATION_NOT_FOUND`. |
+| `PATCH /api/notifications/read-all` | `204`, đánh dấu tất cả thông báo hiện tại đã đọc. |
+| `GET /api/notifications/stream` | `200 text/event-stream`, xác thực bằng cookie; chỉ nhận thay đổi của chính tài khoản. |
+
+Mọi PATCH cần `X-CSRF-Protection: 1`. Kết nối SSE khác origin cần `withCredentials: true` và origin được backend cho phép. Stream gửi `connected` khi kết nối, `notifications-changed` sau khi tạo/đánh dấu đọc đã commit và heartbeat mỗi 25 giây. SSE chỉ báo cần tải lại dữ liệu; frontend lấy danh sách/số chưa đọc qua REST. Mỗi kết nối tồn tại tối đa 120 giây, frontend tự kết nối lại với backoff tối đa 30 giây và đồng bộ lại DB. Phiên hết hạn/thu hồi hoặc tài khoản bị khóa sẽ bị đóng stream.
+
+Thông báo phát sinh từ các nghiệp vụ hiện có:
+
+- Admin ACTIVE nhận sự kiện mới, cập nhật chờ duyệt và yêu cầu hủy.
+- Organizer nhận kết quả xét duyệt và booking đã xác nhận.
+- Customer nhận thông báo khi vé được phát hành thành công (vé miễn phí hoặc IPN VNPay hợp lệ).
+- Customer có booking PAID nhận cập nhật, yêu cầu hủy và kết quả xét duyệt của sự kiện liên quan. Yêu cầu hủy được mô tả là đang chờ xét duyệt, chưa phải sự kiện đã hủy.
+
+STAFF tạm thời không nhận thông báo mới và không được truy cập các REST API/SSE thông báo (`403 FORBIDDEN`).
+
+DB là nguồn dữ liệu chính: đóng web/mất mạng vẫn lưu thông báo, mở lại sẽ tải qua REST. SSE dùng bộ nhớ của một instance backend; triển khai nhiều instance cần bổ sung cơ chế chia sẻ sự kiện. Không thêm email, FCM hoặc Kafka.
 
 ### Mã lỗi
 
@@ -1244,7 +1258,7 @@ Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông
 | --- | --- | --- |
 | `400` | `INVALID_PAGE` / `INVALID_REQUEST` | Phân trang không hợp lệ. |
 | `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
-| `403` | `FORBIDDEN` | Sai role. |
+| `403` | `FORBIDDEN` | Sai role hoặc PATCH thiếu CSRF header. |
 
 Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
 

@@ -137,6 +137,7 @@ class BookingIntegrationTests {
         if (venue != null && venue.getId() != null) venues.deleteById(venue.getId());
         if (category != null && category.getId() != null) categories.deleteById(category.getId());
         for (User user : testUsers) {
+            jdbc.update("DELETE FROM notifications WHERE users_id = ?", user.getId());
             jdbc.update("DELETE FROM refresh_tokens WHERE users_id = ?", user.getId());
             users.deleteById(user.getId());
         }
@@ -231,6 +232,9 @@ class BookingIntegrationTests {
         var callback = callback(pay(id), "00");
         ipn(callback).andExpect(jsonPath("$.RspCode").value("00"));
         ipn(callback).andExpect(jsonPath("$.RspCode").value("02"));
+        assertThat(count("notifications", "users_id", customer.getId())).isEqualTo(1);
+        assertThat(count("notifications", "users_id", organizer.getId())).isEqualTo(1);
+        assertThat(count("notifications", "users_id", other.getId())).isZero();
         assertInventory(3, 0);
         mvc.perform(get("/api/bookings/{id}", id).cookie(access)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PAID"))

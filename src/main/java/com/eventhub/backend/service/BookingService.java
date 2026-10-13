@@ -41,6 +41,7 @@ public class BookingService {
     private final VnPayService vnpay;
     private final ApplicationProperties properties;
     private final Clock clock;
+    private final NotificationService notifications;
 
     @Transactional(readOnly = true)
     public List<TicketTypeInfo> listTicketTypes(Integer userId, Integer eventId) {
@@ -275,6 +276,12 @@ public class BookingService {
         }
         tickets.saveAll(issued);
         booking.setStatus("PAID");
+        notifications.create(booking.getUser(), "Đặt vé thành công",
+                "Booking #" + booking.getId() + " cho sự kiện \"" + booking.getEvent().getName()
+                        + "\" đã được xác nhận. Bạn có thể xem vé điện tử trên web.", "BOOKING_CONFIRMED");
+        notifications.create(booking.getEvent().getOrganizer(), "Có booking được xác nhận",
+                "Booking #" + booking.getId() + " cho sự kiện \"" + booking.getEvent().getName()
+                        + "\" đã được xác nhận.", "BOOKING_CONFIRMED");
     }
 
     private Detail detail(Booking booking) {

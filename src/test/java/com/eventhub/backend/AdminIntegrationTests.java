@@ -220,7 +220,7 @@ class AdminIntegrationTests {
     }
     @Test void failedNotificationRollsBackDecisionAndTickets() {
         org.mockito.Mockito.doThrow(new org.springframework.dao.DataIntegrityViolationException("test failure"))
-                .when(notifications).saveAndFlush(org.mockito.ArgumentMatchers.any(Notification.class));
+                .when(notifications).save(org.mockito.ArgumentMatchers.any(Notification.class));
         assertThatThrownBy(() -> reviews.decide(admin.getId(),eventId,0,null))
                 .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
         assertThat(jdbc.queryForObject("SELECT status FROM events WHERE id=?",String.class,eventId)).isEqualTo("PENDING_APPROVAL");

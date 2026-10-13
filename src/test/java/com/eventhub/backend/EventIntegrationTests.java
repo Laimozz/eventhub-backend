@@ -284,11 +284,12 @@ class EventIntegrationTests {
     }
 
     @Test
-    void shouldReturnExistingCategoriesForAuthenticatedUser() throws Exception {
+    void shouldReturnExistingCategoriesForPublicAndAuthenticatedUsers() throws Exception {
         mvc.perform(get("/api/categories").cookie(access)).andExpect(status().isOk())
                 .andExpect(jsonPath("$[*].id").value(org.hamcrest.Matchers.hasItem(category.getId())))
                 .andExpect(jsonPath("$[*].name").value(org.hamcrest.Matchers.hasItem(category.getName())));
-        mvc.perform(get("/api/categories")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/categories")).andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].id").value(org.hamcrest.Matchers.hasItem(category.getId())));
     }
 
     @Test
