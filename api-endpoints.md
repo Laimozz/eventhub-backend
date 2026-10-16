@@ -38,13 +38,13 @@ X-CSRF-Protection: 1
 | UC35 | Duyệt sự kiện | `POST /api/admin/events/{eventId}/approve` | Required — access token, role `ADMIN` | `200 OK` |
 | UC36 | Từ chối sự kiện | `POST /api/admin/events/{eventId}/reject` | Required — access token, role `ADMIN` | `200 OK` |
 | Hỗ trợ UC35–36 | Organizer đọc thông báo | `GET /api/notifications` | Required — access token, role `ORGANIZER` | `200 OK` |
-| Staff | Sự kiện phân công của Staff | `GET /api/staff/events` | Required — access token, role `STAFF` | `200 OK` |
-| Staff | Chi tiết sự kiện của Staff | `GET /api/staff/events/{eventId}` | Required — access token, role `STAFF` | `200 OK` |
-| Staff | Danh sách khách hàng đã đặt vé | `GET /api/staff/events/{eventId}/customers` | Required — access token, role `STAFF` | `200 OK` |
-| Staff | Danh sách loại vé sự kiện | `GET /api/staff/events/{eventId}/ticket-types` | Required — access token, role `STAFF` | `200 OK` |
-| Staff | Thống kê vé sự kiện | `GET /api/staff/events/{eventId}/stats` | Required — access token, role `STAFF` | `200 OK` |
-| Staff | Danh sách vé và bộ lọc soát vé | `GET /api/staff/events/{eventId}/tickets` | Required — access token, role `STAFF` | `200 OK` |
-| Staff | Soát vé / Check-in QR | `POST /api/staff/events/{eventId}/check-in` | Required — access token, role `STAFF` | `200 OK` |
+| UC28 | Xem danh sách sự kiện được phân công | `GET /api/staff/events` | Required — access token, role `STAFF` | `200 OK` |
+| UC29 | Xem chi tiết sự kiện được phân công | `GET /api/staff/events/{eventId}` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Danh sách khách hàng đã đặt vé | `GET /api/staff/events/{eventId}/customers` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Danh sách loại vé sự kiện | `GET /api/staff/events/{eventId}/ticket-types` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Thống kê vé sự kiện | `GET /api/staff/events/{eventId}/stats` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Danh sách vé và bộ lọc soát vé | `GET /api/staff/events/{eventId}/tickets` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Soát vé / Check-in QR (Mobile) | `POST /api/staff/events/{eventId}/check-in` | Required — access token, role `STAFF` | `200 OK` |
 
 ## 3. Đăng ký tài khoản
 
@@ -1400,11 +1400,11 @@ Lỗi dùng `GlobalExceptionHandler` hiện tại (`REQUEST_ERROR`, `VALIDATION_
 
 ---
 
-## 17. Phân hệ Nhân viên soát vé (Staff Portal APIs)
+## 17. Phân hệ Nhân viên soát vé — UC28 & UC29 (Staff Portal APIs)
 
-Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) truy vấn sự kiện phân công, kiểm tra chi tiết danh sách vé, thống kê soát vé và thực hiện check-in.
+Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) phục vụ **UC28 (Xem danh sách sự kiện được phân công)** và **UC29 (Xem chi tiết sự kiện được phân công)**, bao gồm tra cứu sự kiện, kiểm tra danh sách vé, bộ lọc vé, thống kê soát vé và thực hiện check-in.
 
-### 17.1. Danh sách sự kiện được phân công
+### 17.1. UC28 — Xem danh sách sự kiện được phân công
 
 | Mục | Nội dung |
 | --- | --- |
@@ -1414,7 +1414,7 @@ Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) truy vấn s
 | **Query Parameters** | `date` (tùy chọn, format YYYY-MM-DD), `status` (tùy chọn: `APPROVED`, `ONGOING`, `COMPLETED`) |
 | **Response** | `200 OK` — `List<StaffAssignedEventResponse>` (`eventId`, `eventName`, `thumbnailImageUrl`, `bannerImageUrl`, `startTime`, `endTime`, `eventStatus`, `venueName`, `venueAddress`, `staffStatus`, `assignedAt`, `checkedInTickets`, `totalPaidTickets`, `checkInRate`) |
 
-### 17.2. Chi tiết sự kiện phân công
+### 17.2. UC29 — Xem chi tiết sự kiện được phân công
 
 | Mục | Nội dung |
 | --- | --- |
@@ -1423,7 +1423,7 @@ Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) truy vấn s
 | **Role** | `STAFF` (chỉ xem được sự kiện mình được phân công) |
 | **Response** | `200 OK` — `StaffEventDetailDto` đầy đủ thông tin sự kiện, địa điểm, ban tổ chức, sơ đồ `imageZoneUrl`, và trạng thái phân công `staffStatus`. |
 
-### 17.3. Danh sách khách hàng đã đặt vé
+### 17.3. Hỗ trợ UC29 — Danh sách khách hàng đã đặt vé
 
 | Mục | Nội dung |
 | --- | --- |
@@ -1433,7 +1433,7 @@ Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) truy vấn s
 | **Mô tả** | Truy vấn danh sách khách hàng có booking `PAID` của sự kiện để gán vào thanh lọc (select box) tại giao diện chi tiết sự kiện. |
 | **Response** | `200 OK` — `List<StaffCustomerDto>` (`id`, `fullName`, `email`, `phone`, `ticketCount`) |
 
-### 17.4. Danh sách loại vé sự kiện
+### 17.4. Hỗ trợ UC29 — Danh sách loại vé sự kiện
 
 | Mục | Nội dung |
 | --- | --- |
@@ -1443,7 +1443,7 @@ Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) truy vấn s
 | **Mô tả** | Trả về danh sách loại vé (Standard, VIP, Early Bird, ...) để gán vào select box lọc loại vé. |
 | **Response** | `200 OK` — `List<StaffTicketTypeDto>` (`id`, `name`, `price`, `quantity`) |
 
-### 17.5. Thống kê vé sự kiện
+### 17.5. Hỗ trợ UC29 — Thống kê vé sự kiện
 
 | Mục | Nội dung |
 | --- | --- |
@@ -1452,7 +1452,7 @@ Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) truy vấn s
 | **Role** | `STAFF` |
 | **Response** | `200 OK` — `StaffTicketStatsDto` (`totalTickets`, `checkedInTickets`, `remainingTickets`, `checkInRate`) |
 
-### 17.6. Danh sách vé theo bộ lọc và phân trang
+### 17.6. Hỗ trợ UC29 — Danh sách vé theo bộ lọc và phân trang
 
 | Mục | Nội dung |
 | --- | --- |
@@ -1462,7 +1462,7 @@ Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) truy vấn s
 | **Query Parameters** | `customerId` (tùy chọn), `ticketTypeId` (tùy chọn), `status` (tùy chọn: `CHECKED_IN`, `NOT_CHECKED_IN`), `page` (default `0`), `size` (default `20`) |
 | **Response** | `200 OK` — `StaffTicketPageResponse` (`content: List<StaffTicketDto>`, `pageNumber`, `pageSize`, `totalElements`, `totalPages`, `last`) |
 
-### 17.7. Check-in vé tại cổng (Dành cho Mobile App)
+### 17.7. Hỗ trợ UC29 (Mobile App) — Check-in vé tại cổng
 
 | Mục | Nội dung |
 | --- | --- |
