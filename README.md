@@ -25,6 +25,14 @@ Hiện tại dự án có entity/repository, migration Flyway và kiểm thử t
 - Flyway V4 thêm version, REJECTED và unique index danh mục. Nếu có tên trùng sau chuẩn hóa, migration dừng; xử lý dữ liệu có chủ đích trước khi chạy lại, không tự gộp/xóa.
 - Dùng JDK21 khi chạy Maven. AdminIntegrationTests kiểm tra API thật trên PostgreSQL test riêng. Không chạy migration/test vào DB nghiệp vụ.
 
+### Phân hệ Nhân viên soát vé (Staff)
+
+- Cung cấp REST API cho Staff (`/api/staff/**`) có bảo vệ bằng Spring Security với `hasRole('STAFF')`.
+- API phân công sự kiện: Danh sách sự kiện được phân công (`GET /api/staff/events`), chi tiết sự kiện (`GET /api/staff/events/{eventId}`).
+- API soát vé: Danh sách khách hàng đã mua vé (`GET /api/staff/events/{eventId}/customers`), danh sách loại vé (`GET /api/staff/events/{eventId}/ticket-types`), thống kê vé (`GET /api/staff/events/{eventId}/stats`), danh sách vé có lọc kết hợp và phân trang (`GET /api/staff/events/{eventId}/tickets`).
+- Toàn bộ câu truy vấn dữ liệu soát vé sử dụng `@Query(..., nativeQuery = true)` chuẩn SQL tối ưu hiệu năng.
+- Chi tiết xem [Tài liệu API Phân hệ Nhân viên soát vé](api-endpoints.md#17-phân-hệ-nhân-viên-soát-vé-staff-portal-apis).
+
 ## 2. Chuẩn bị và chạy dự án
 
 ### Yêu cầu

@@ -38,6 +38,13 @@ X-CSRF-Protection: 1
 | UC35 | Duyệt sự kiện | `POST /api/admin/events/{eventId}/approve` | Required — access token, role `ADMIN` | `200 OK` |
 | UC36 | Từ chối sự kiện | `POST /api/admin/events/{eventId}/reject` | Required — access token, role `ADMIN` | `200 OK` |
 | Hỗ trợ UC35–36 | Organizer đọc thông báo | `GET /api/notifications` | Required — access token, role `ORGANIZER` | `200 OK` |
+| Staff | Sự kiện phân công của Staff | `GET /api/staff/events` | Required — access token, role `STAFF` | `200 OK` |
+| Staff | Chi tiết sự kiện của Staff | `GET /api/staff/events/{eventId}` | Required — access token, role `STAFF` | `200 OK` |
+| Staff | Danh sách khách hàng đã đặt vé | `GET /api/staff/events/{eventId}/customers` | Required — access token, role `STAFF` | `200 OK` |
+| Staff | Danh sách loại vé sự kiện | `GET /api/staff/events/{eventId}/ticket-types` | Required — access token, role `STAFF` | `200 OK` |
+| Staff | Thống kê vé sự kiện | `GET /api/staff/events/{eventId}/stats` | Required — access token, role `STAFF` | `200 OK` |
+| Staff | Danh sách vé và bộ lọc soát vé | `GET /api/staff/events/{eventId}/tickets` | Required — access token, role `STAFF` | `200 OK` |
+| Staff | Soát vé / Check-in QR | `POST /api/staff/events/{eventId}/check-in` | Required — access token, role `STAFF` | `200 OK` |
 
 ## 3. Đăng ký tài khoản
 
@@ -1390,3 +1397,81 @@ API này chỉ đọc vé của customer. Chức năng quét và cập nhật ch
 | `503` | Chưa cấu hình merchant/secret VNPay Sandbox hợp lệ |
 
 Lỗi dùng `GlobalExceptionHandler` hiện tại (`REQUEST_ERROR`, `VALIDATION_ERROR`, `INVALID_REQUEST`, ...). Cấu hình môi trường Sandbox và IPN công khai xem [README](README.md#customer-booking-và-vnpay-sandbox); tham khảo giao thức trong [tài liệu VNPay PAY](https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html).
+
+---
+
+## 17. Phân hệ Nhân viên soát vé (Staff Portal APIs)
+
+Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) truy vấn sự kiện phân công, kiểm tra chi tiết danh sách vé, thống kê soát vé và thực hiện check-in.
+
+### 17.1. Danh sách sự kiện được phân công
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Query Parameters** | `date` (tùy chọn, format YYYY-MM-DD), `status` (tùy chọn: `APPROVED`, `ONGOING`, `COMPLETED`) |
+| **Response** | `200 OK` — `List<StaffAssignedEventResponse>` (`eventId`, `eventName`, `thumbnailImageUrl`, `bannerImageUrl`, `startTime`, `endTime`, `eventStatus`, `venueName`, `venueAddress`, `staffStatus`, `assignedAt`, `checkedInTickets`, `totalPaidTickets`, `checkInRate`) |
+
+### 17.2. Chi tiết sự kiện phân công
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events/{eventId}` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` (chỉ xem được sự kiện mình được phân công) |
+| **Response** | `200 OK` — `StaffEventDetailDto` đầy đủ thông tin sự kiện, địa điểm, ban tổ chức, sơ đồ `imageZoneUrl`, và trạng thái phân công `staffStatus`. |
+
+### 17.3. Danh sách khách hàng đã đặt vé
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events/{eventId}/customers` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Mô tả** | Truy vấn danh sách khách hàng có booking `PAID` của sự kiện để gán vào thanh lọc (select box) tại giao diện chi tiết sự kiện. |
+| **Response** | `200 OK` — `List<StaffCustomerDto>` (`id`, `fullName`, `email`, `phone`, `ticketCount`) |
+
+### 17.4. Danh sách loại vé sự kiện
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events/{eventId}/ticket-types` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Mô tả** | Trả về danh sách loại vé (Standard, VIP, Early Bird, ...) để gán vào select box lọc loại vé. |
+| **Response** | `200 OK` — `List<StaffTicketTypeDto>` (`id`, `name`, `price`, `quantity`) |
+
+### 17.5. Thống kê vé sự kiện
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events/{eventId}/stats` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Response** | `200 OK` — `StaffTicketStatsDto` (`totalTickets`, `checkedInTickets`, `remainingTickets`, `checkInRate`) |
+
+### 17.6. Danh sách vé theo bộ lọc và phân trang
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events/{eventId}/tickets` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Query Parameters** | `customerId` (tùy chọn), `ticketTypeId` (tùy chọn), `status` (tùy chọn: `CHECKED_IN`, `NOT_CHECKED_IN`), `page` (default `0`), `size` (default `20`) |
+| **Response** | `200 OK` — `StaffTicketPageResponse` (`content: List<StaffTicketDto>`, `pageNumber`, `pageSize`, `totalElements`, `totalPages`, `last`) |
+
+### 17.7. Check-in vé tại cổng (Dành cho Mobile App)
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `POST /api/staff/events/{eventId}/check-in` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Header** | `X-CSRF-Protection: 1` |
+| **Request Body** | `{ "ticketCode": "TIC-123456", "qrToken": "..." }` (hoặc ticketId) |
+| **Response** | `200 OK` — `{ "success": true, "message": "Check-in thành công", "ticketId": 123, "checkedInAt": "..." }` |
+| **Lỗi** | `400` Vé không hợp lệ / sai sự kiện; `409` Vé đã được check-in trước đó. |
+| **Lưu ý** | Giao diện Web hiển thị chế độ giám sát và tra cứu (chỉ đọc); chức năng quét mã check-in thực tế được vận hành qua ứng dụng di động (Mobile App). |
+
