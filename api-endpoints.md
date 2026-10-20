@@ -38,6 +38,17 @@ X-CSRF-Protection: 1
 | UC35 | Duyệt sự kiện | `POST /api/admin/events/{eventId}/approve` | Required — access token, role `ADMIN` | `200 OK` |
 | UC36 | Từ chối sự kiện | `POST /api/admin/events/{eventId}/reject` | Required — access token, role `ADMIN` | `200 OK` |
 | Hỗ trợ UC35–36 | Organizer đọc thông báo | `GET /api/notifications` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC13 | Quản lý Staff — Danh sách staff | `GET /api/events/{eventId}/staffs` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC13 | Quản lý Staff — Thêm staff | `POST /api/events/{eventId}/staffs` | Required — access token, role `ORGANIZER` | `201 Created` |
+| UC13 | Quản lý Staff — Cập nhật trạng thái | `PATCH /api/events/{eventId}/staffs/{staffId}/status` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC13 | Quản lý Staff — Xóa staff | `DELETE /api/events/{eventId}/staffs/{staffId}` | Required — access token, role `ORGANIZER` | `204 No Content` |
+| UC14 | Xem thống kê sự kiện | `GET /api/events/{eventId}/statistics` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC24 | Xem doanh thu và số dư ví | `GET /api/organizer/wallet` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC25 | Tạo yêu cầu rút tiền | `POST /api/organizer/withdrawals` | Required — access token, role `ORGANIZER` | `201 Created` |
+| Hỗ trợ UC25 | Xác nhận / xem trước rút tiền | `POST /api/organizer/withdrawals/preview` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC26 | Xem lịch sử yêu cầu rút tiền | `GET /api/organizer/withdrawals` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC27 | Xem chi tiết yêu cầu rút tiền | `GET /api/organizer/withdrawals/{id}` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC27 | Hủy yêu cầu rút tiền | `POST /api/organizer/withdrawals/{id}/cancel` | Required — access token, role `ORGANIZER` | `200 OK` |
 
 ## 3. Đăng ký tài khoản
 
@@ -1247,3 +1258,456 @@ Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông
 | `403` | `FORBIDDEN` | Sai role. |
 
 Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
+
+## 16. Quản lý Staff của sự kiện (UC13)
+
+Các endpoint dưới đây chỉ dành cho `ORGANIZER` đang `ACTIVE`, thao tác trên sự kiện do chính mình tổ chức và sự kiện đã được Admin duyệt (`APPROVED`, `ONGOING`, `COMPLETED`).
+
+### 16.1. Danh sách Staff sự kiện
+- **Endpoint**: `GET /api/events/{eventId}/staffs`
+- **Quyền**: `ORGANIZER`
+- **Response**: `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "staffId": 12,
+    "fullName": "Nguyễn Đăng Nam",
+    "email": "nguyennam60yb@gmail.com",
+    "phone": "0900000000",
+    "status": "ACTIVE",
+    "inCheckinShift": false,
+    "createdAt": "2026-10-15T08:00:00"
+  }
+]
+```
+
+### 16.2. Thêm Staff vào sự kiện
+- **Endpoint**: `POST /api/events/{eventId}/staffs`
+- **Quyền**: `ORGANIZER`
+- **Request Body**:
+```json
+{
+  "email": "nguyennam60yb@gmail.com"
+}
+```
+- **Response**: `201 Created`
+- **Mã lỗi**:
+  - `404 USER_NOT_FOUND`: Email nhập vào không tồn tại trong hệ thống (Exception 5.1).
+  - `400 NOT_CUSTOMER_ACCOUNT`: Email nhập vào không thuộc tài khoản Customer (Exception 5.2).
+  - `409 STAFF_ALREADY_ASSIGNED`: Staff này đã được phân công cho sự kiện.
+  - `400 EVENT_NOT_APPROVED`: Chỉ có thể quản lý staff cho sự kiện đã được Admin duyệt.
+  - `404 EVENT_NOT_FOUND`: Không tìm thấy sự kiện.
+
+### 16.3. Cập nhật trạng thái Staff (Khóa / Mở)
+- **Endpoint**: `PATCH /api/events/{eventId}/staffs/{staffId}/status`
+- **Quyền**: `ORGANIZER`
+- **Request Body**:
+```json
+{
+  "status": "ACTIVE"
+}
+```
+- **Response**: `200 OK`
+
+### 16.4. Xóa Staff khỏi sự kiện
+- **Endpoint**: `DELETE /api/events/{eventId}/staffs/{staffId}`
+- **Quyền**: `ORGANIZER`
+- **Response**: `204 No Content`
+- Tự động hoàn lại role `CUSTOMER` nếu tài khoản không còn phân công ở sự kiện nào khác.
+
+## 17. Xem thống kê sự kiện (UC14)
+
+Endpoint dành cho `ORGANIZER` xem số liệu bán vé và doanh thu của sự kiện do chính mình tổ chức, sự kiện đã được Admin duyệt (`APPROVED`, `ONGOING`, `COMPLETED`) và đã mở bán.
+
+### 17.1. Xem thống kê bán vé và doanh thu
+- **Endpoint**: `GET /api/events/{eventId}/statistics`
+- **Method**: `GET`
+- **Quyền**: `ORGANIZER`
+- **Response thành công**: `200 OK`
+```json
+{
+  "eventId": 10,
+  "eventName": "Đại Nhạc Hội Mùa Thu",
+  "totalSoldTickets": 275,
+  "totalTickets": 400,
+  "totalRemainingTickets": 125,
+  "soldRatioFormatted": "275 / 400",
+  "totalRevenue": 202500000.00,
+  "overallSalesRate": 68.75,
+  "formattedOverallSalesRate": "68.75%",
+  "ticketTypes": [
+    {
+      "ticketTypeId": 101,
+      "name": "Vé VIP",
+      "price": 1500000.00,
+      "totalQuantity": 100,
+      "soldQuantity": 65,
+      "remainingQuantity": 35,
+      "salesRate": 65.0,
+      "formattedSalesRate": "65%",
+      "revenue": 97500000.00
+    },
+    {
+      "ticketTypeId": 102,
+      "name": "Vé Thường",
+      "price": 500000.00,
+      "totalQuantity": 300,
+      "soldQuantity": 210,
+      "remainingQuantity": 90,
+      "salesRate": 70.0,
+      "formattedSalesRate": "70%",
+      "revenue": 105000000.00
+    }
+  ]
+}
+```
+
+### 17.2. Trường hợp chưa có vé nào được bán (Quy tắc 3.1)
+- Trả về `200 OK` với các chỉ số bán vé và doanh thu bằng `0`:
+```json
+{
+  "eventId": 10,
+  "eventName": "Đại Nhạc Hội Mùa Thu",
+  "totalSoldTickets": 0,
+  "totalTickets": 400,
+  "totalRemainingTickets": 400,
+  "soldRatioFormatted": "0 / 400",
+  "totalRevenue": 0.00,
+  "overallSalesRate": 0.0,
+  "formattedOverallSalesRate": "0%",
+  "ticketTypes": [
+    {
+      "ticketTypeId": 101,
+      "name": "Vé VIP",
+      "price": 1500000.00,
+      "totalQuantity": 100,
+      "soldQuantity": 0,
+      "remainingQuantity": 100,
+      "salesRate": 0.0,
+      "formattedSalesRate": "0%",
+      "revenue": 0.00
+    }
+  ]
+}
+```
+
+### 17.3. Các mã lỗi thường gặp
+| Status | Code | Mô tả |
+| --- | --- | --- |
+| `400` | `EVENT_NOT_APPROVED` | Sự kiện chưa được duyệt hoặc chưa mở bán (Rule 1.1). |
+| `400` | `EVENT_NOT_OPEN_FOR_SALE` | Sự kiện đã duyệt nhưng thời gian mở bán chưa tới (Rule 1.1). |
+| `403` | `FORBIDDEN` | Tài khoản không có quyền xem sự kiện này hoặc không phải Organizer. |
+| `404` | `EVENT_NOT_FOUND` | Không tìm thấy sự kiện. |
+
+## 18. Xem doanh thu và số dư ví (UC24)
+
+Endpoint dành cho `ORGANIZER` xem thông tin số dư ví (chờ xác nhận, khả dụng, chờ rút, đã rút) và doanh thu theo từng sự kiện.
+
+### 18.1. Xem doanh thu và số dư ví
+- **Endpoint**: `GET /api/organizer/wallet` (hoặc `GET /api/organizer/revenue`)
+- **Method**: `GET`
+- **Quyền**: `ORGANIZER`
+- **Response thành công**: `200 OK`
+```json
+{
+  "pendingBalance": 15000000.00,
+  "formattedPendingBalance": "15.000.000đ",
+  "availableBalance": 42300000.00,
+  "formattedAvailableBalance": "42.300.000đ",
+  "withdrawalPendingBalance": 5000000.00,
+  "formattedWithdrawalPendingBalance": "5.000.000đ",
+  "totalWithdrawn": 80000000.00,
+  "formattedTotalWithdrawn": "80.000.000đ",
+  "eventRevenues": [
+    {
+      "eventId": 10,
+      "eventName": "Đêm nhạc Acoustic Thu",
+      "revenue": 97500000.00,
+      "formattedRevenue": "97.500.000đ",
+      "soldTickets": 65,
+      "totalTickets": 100
+    },
+    {
+      "eventId": 20,
+      "eventName": "Hội thảo Công nghệ AI",
+      "revenue": 105000000.00,
+      "formattedRevenue": "105.000.000đ",
+      "soldTickets": 210,
+      "totalTickets": 300
+    }
+  ]
+}
+```
+
+### 18.2. Trường hợp chưa từng bán vé sự kiện nào (Quy tắc 2.1)
+- Hiển thị toàn bộ số dư bằng `0` và danh sách doanh thu trống:
+```json
+{
+  "pendingBalance": 0.00,
+  "formattedPendingBalance": "0đ",
+  "availableBalance": 0.00,
+  "formattedAvailableBalance": "0đ",
+  "withdrawalPendingBalance": 0.00,
+  "formattedWithdrawalPendingBalance": "0đ",
+  "totalWithdrawn": 0.00,
+  "formattedTotalWithdrawn": "0đ",
+  "eventRevenues": []
+}
+```
+
+### 18.3. Các mã lỗi thường gặp
+| Status | Code | Mô tả |
+| --- | --- | --- |
+| `401` | `UNAUTHORIZED` | Chưa đăng nhập hoặc access token không hợp lệ. |
+| `403` | `FORBIDDEN` | Tài khoản không có role `ORGANIZER` hoặc không ở trạng thái `ACTIVE`. |
+
+## 19. UC25 — Tạo Yêu Cầu Rút Tiền
+ 
+Bộ endpoint dành cho `ORGANIZER` thực hiện quy trình rút tiền từ số dư khả dụng sang số dư đang chờ rút.
+ 
+### 19.1. Tạo yêu cầu rút tiền (Bước 5–6)
+- **Endpoint**: `POST /api/organizer/withdrawals`
+- **Method**: `POST`
+- **Quyền**: `ORGANIZER`
+- **Header bắt buộc**: `X-CSRF-Protection: 1`
+- **Request body**:
+```json
+{
+  "amount": 10000000,
+  "bankName": "Vietcombank",
+  "accountNumber": "0123456789"
+}
+```
+ 
+| Trường | Kiểu | Bắt buộc | Ràng buộc |
+| --- | --- | --- | --- |
+| `amount` | `BigDecimal` | Có | > 0, ≤ số dư khả dụng |
+| `bankName` | `String` | Có | Không rỗng, tối đa 255 ký tự |
+| `accountNumber` | `String` | Có | Không rỗng, tối đa 50 ký tự |
+ 
+- **Response thành công**: `201 Created`
+```json
+{
+  "id": 1,
+  "amount": 10000000.00,
+  "formattedAmount": "10.000.000đ",
+  "bankName": "Vietcombank",
+  "accountNumber": "0123456789",
+  "status": "PENDING",
+  "statusDisplay": "Chờ duyệt",
+  "requestedAt": "2026-10-20T05:48:00",
+  "availableBalanceAfter": 32300000.00,
+  "formattedAvailableBalanceAfter": "32.300.000đ",
+  "processedAt": null,
+  "rejectReason": null,
+  "transactionCode": null
+}
+```
+ 
+### 19.2. Xác nhận / Xem trước thông tin rút tiền (Bước 4)
+Endpoint hỗ trợ màn hình xác nhận thông tin trước khi gửi yêu cầu (hiển thị số tiền, ngân hàng, số dư khả dụng còn lại sau khi trừ).
+- **Endpoint**: `POST /api/organizer/withdrawals/preview`
+- **Method**: `POST`
+- **Quyền**: `ORGANIZER`
+- **Header bắt buộc**: `X-CSRF-Protection: 1`
+- **Request body**: Giống 19.1
+- **Response thành công**: `200 OK`
+```json
+{
+  "amount": 10000000.00,
+  "formattedAmount": "10.000.000đ",
+  "bankName": "Vietcombank",
+  "accountNumber": "0123456789",
+  "currentAvailableBalance": 42300000.00,
+  "formattedCurrentAvailableBalance": "42.300.000đ",
+  "availableBalanceAfter": 32300000.00,
+  "formattedAvailableBalanceAfter": "32.300.000đ"
+}
+```
+ 
+### 19.3. Danh sách lịch sử yêu cầu rút tiền
+- **Endpoint**: `GET /api/organizer/withdrawals`
+- **Method**: `GET`
+- **Quyền**: `ORGANIZER`
+- **Response thành công**: `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "amount": 10000000.00,
+    "formattedAmount": "10.000.000đ",
+    "bankName": "Vietcombank",
+    "accountNumber": "0123456789",
+    "status": "PENDING",
+    "statusDisplay": "Chờ duyệt",
+    "requestedAt": "2026-10-20T05:48:00",
+    "availableBalanceAfter": null,
+    "formattedAvailableBalanceAfter": null,
+    "processedAt": null,
+    "rejectReason": null,
+    "transactionCode": null
+  }
+]
+```
+ 
+### 19.4. Nghiệp vụ xử lý
+1. **Pre-condition**: Nhà tổ chức đã đăng nhập và tài khoản ở trạng thái `ACTIVE` với role `ORGANIZER`. Số dư khả dụng > 0.
+2. **Nhập thông tin (Bước 2–3)**: Nhà tổ chức nhập số tiền muốn rút, tên ngân hàng, số tài khoản.
+3. **Xác nhận (Bước 4)**: Hệ thống hiển thị lại số tiền, ngân hàng, số tài khoản và số dư khả dụng còn lại sau khi trừ (`availableBalanceAfter`). Nếu nhà tổ chức chọn "Hủy" (Exception 5.1), không tạo bản ghi nào và quay lại form nhập.
+4. **Xác nhận gửi (Bước 5–6)**: Hệ thống kiểm tra số dư khả dụng một lần nữa, trừ `amount` khỏi `availableBalance`, cộng vào `withdrawalPendingBalance`, lưu bản ghi `WithdrawalRequest` với trạng thái `PENDING` ("Chờ duyệt") để gửi cho Admin xử lý.
+ 
+### 19.5. Các mã lỗi
+| Status | Code | Mô tả |
+| --- | --- | --- |
+| `400` | `VALIDATION_ERROR` | Thiếu thông tin ngân hàng hoặc số tài khoản rỗng (Exception 3.3). |
+| `400` | `INVALID_AMOUNT` | Số tiền rút <= 0 (Exception 3.2). |
+| `400` | `INSUFFICIENT_BALANCE` | Số tiền rút vượt quá số dư khả dụng hoặc số dư khả dụng bằng 0 (Exception 3.1). |
+| `401` | `UNAUTHORIZED` | Chưa đăng nhập hoặc access token không hợp lệ / hết hạn. |
+| `403` | `FORBIDDEN` | Tài khoản không có role `ORGANIZER` hoặc tài khoản bị khóa / không ở trạng thái `ACTIVE`. |
+
+## 20. UC26 — Xem Lịch Sử Yêu Cầu Rút Tiền
+
+Endpoint lấy danh sách các yêu cầu rút tiền của Nhà tổ chức kèm bộ lọc theo trạng thái.
+
+### 20.1. Lấy danh sách lịch sử rút tiền
+- **Endpoint**: `GET /api/organizer/withdrawals`
+- **Method**: `GET`
+- **Quyền**: `ORGANIZER`
+- **Query Parameters**:
+  - `status` (tùy chọn): Lọc theo trạng thái. Hỗ trợ:
+    - Bỏ trống hoặc `ALL` / `TAT_CA`: Lấy tất cả
+    - `PENDING` hoặc `CHO_DUYET`: Chờ duyệt
+    - `APPROVED` hoặc `DA_DUYET`: Đã duyệt
+    - `REJECTED` hoặc `BI_TU_CHOI`: Bị từ chối
+    - `CANCELLED` hoặc `DA_HUY`: Đã hủy
+
+- **Response thành công**: `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "amount": 10000000.00,
+    "formattedAmount": "10.000.000đ",
+    "bankName": "Vietcombank",
+    "accountNumber": "0123456789",
+    "status": "APPROVED",
+    "statusDisplay": "Đã duyệt",
+    "requestedAt": "2026-09-01T08:30:00",
+    "availableBalanceAfter": null,
+    "formattedAvailableBalanceAfter": null,
+    "processedAt": "2026-09-01T15:00:00",
+    "rejectReason": null,
+    "transactionCode": "TXN-20260901-001",
+    "canCancel": false
+  },
+  {
+    "id": 2,
+    "amount": 5000000.00,
+    "formattedAmount": "5.000.000đ",
+    "bankName": "Vietcombank",
+    "accountNumber": "0123456789",
+    "status": "PENDING",
+    "statusDisplay": "Chờ duyệt",
+    "requestedAt": "2026-09-10T14:00:00",
+    "availableBalanceAfter": null,
+    "formattedAvailableBalanceAfter": null,
+    "processedAt": null,
+    "rejectReason": null,
+    "transactionCode": null,
+    "canCancel": true
+  }
+]
+```
+
+### 20.2. Xử lý ngoại lệ
+- **Exception 2.1**: Nhà tổ chức chưa từng tạo yêu cầu rút tiền nào → Trả về danh sách rỗng `[]`.
+- **Exception 4.1**: Không có yêu cầu nào khớp với trạng thái đã lọc → Trả về danh sách rỗng `[]`.
+
+---
+
+## 21. UC27 — Xem Chi Tiết & Hủy Yêu Cầu Rút Tiền
+
+Các endpoint xem chi tiết một yêu cầu rút tiền và cho phép Nhà tổ chức hủy yêu cầu khi đang ở trạng thái `PENDING`.
+
+### 21.1. Xem chi tiết yêu cầu rút tiền
+- **Endpoint**: `GET /api/organizer/withdrawals/{id}`
+- **Method**: `GET`
+- **Quyền**: `ORGANIZER`
+- **Path Parameter**: `id` (mã yêu cầu rút tiền)
+
+- **Response thành công (Trạng thái Chờ duyệt)**: `200 OK`
+```json
+{
+  "id": 2,
+  "amount": 5000000.00,
+  "formattedAmount": "5.000.000đ",
+  "bankName": "Vietcombank",
+  "accountNumber": "0123456789",
+  "status": "PENDING",
+  "statusDisplay": "Chờ duyệt",
+  "requestedAt": "2026-09-10T14:00:00",
+  "availableBalanceAfter": null,
+  "formattedAvailableBalanceAfter": null,
+  "processedAt": null,
+  "rejectReason": null,
+  "transactionCode": null,
+  "canCancel": true
+}
+```
+
+- **Response thành công (Exception 2.1 — Trạng thái Bị từ chối)**: `200 OK`
+```json
+{
+  "id": 3,
+  "amount": 3000000.00,
+  "formattedAmount": "3.000.000đ",
+  "bankName": "Vietcombank",
+  "accountNumber": "0123456789",
+  "status": "REJECTED",
+  "statusDisplay": "Bị từ chối",
+  "requestedAt": "2026-09-15T09:00:00",
+  "availableBalanceAfter": null,
+  "formattedAvailableBalanceAfter": null,
+  "processedAt": "2026-09-15T11:30:00",
+  "rejectReason": "Số tài khoản thụ hưởng không chính xác",
+  "transactionCode": null,
+  "canCancel": false
+}
+```
+
+### 21.2. Hủy yêu cầu rút tiền
+Nhà tổ chức hủy yêu cầu rút tiền khi yêu cầu đang ở trạng thái `PENDING` ("Chờ duyệt"). Hệ thống tự động hoàn trả số tiền từ `withdrawalPendingBalance` về `availableBalance`.
+- **Endpoint**: `POST /api/organizer/withdrawals/{id}/cancel` (hỗ trợ cả `PATCH`)
+- **Method**: `POST` / `PATCH`
+- **Quyền**: `ORGANIZER`
+- **Header bắt buộc**: `X-CSRF-Protection: 1`
+- **Path Parameter**: `id` (mã yêu cầu rút tiền)
+
+- **Response thành công**: `200 OK`
+```json
+{
+  "id": 2,
+  "amount": 5000000.00,
+  "formattedAmount": "5.000.000đ",
+  "bankName": "Vietcombank",
+  "accountNumber": "0123456789",
+  "status": "CANCELLED",
+  "statusDisplay": "Đã hủy",
+  "requestedAt": "2026-09-10T14:00:00",
+  "availableBalanceAfter": 47300000.00,
+  "formattedAvailableBalanceAfter": "47.300.000đ",
+  "processedAt": null,
+  "rejectReason": null,
+  "transactionCode": null,
+  "canCancel": false
+}
+```
+
+### 21.3. Các mã lỗi thường gặp cho UC27
+| Status | Code | Mô tả |
+| --- | --- | --- |
+| `400` | `CANNOT_CANCEL_REQUEST` | Yêu cầu đã được duyệt (`APPROVED`) hoặc đã bị từ chối (`REJECTED`) hoặc đã hủy trước đó (Exception 3.1). |
+| `404` | `NOT_FOUND` | Không tìm thấy yêu cầu rút tiền với ID đã chỉ định hoặc yêu cầu không thuộc về Organizer này. |
+| `401` | `UNAUTHORIZED` | Chưa đăng nhập hoặc phiên làm việc đã hết hạn. |
+| `403` | `FORBIDDEN` | Tài khoản không có role `ORGANIZER` hoặc tài khoản bị khóa (`LOCKED`). |
