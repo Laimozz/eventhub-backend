@@ -51,7 +51,8 @@ class UserControllerTest {
             "namnguyenhai08012004@gmail.com",
             "Nguyễn Hải Nam",
             "0522899888",
-            Role.CUSTOMER
+            Role.CUSTOMER,
+            null
     );
 
     @BeforeEach

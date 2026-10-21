@@ -38,17 +38,32 @@ X-CSRF-Protection: 1
 | UC35 | Duyệt sự kiện | `POST /api/admin/events/{eventId}/approve` | Required — access token, role `ADMIN` | `200 OK` |
 | UC36 | Từ chối sự kiện | `POST /api/admin/events/{eventId}/reject` | Required — access token, role `ADMIN` | `200 OK` |
 | Hỗ trợ UC35–36 | Organizer đọc thông báo | `GET /api/notifications` | Required — access token, role `ORGANIZER` | `200 OK` |
-| UC13 | Quản lý Staff — Danh sách staff | `GET /api/events/{eventId}/staffs` | Required — access token, role `ORGANIZER` | `200 OK` |
-| UC13 | Quản lý Staff — Thêm staff | `POST /api/events/{eventId}/staffs` | Required — access token, role `ORGANIZER` | `201 Created` |
-| UC13 | Quản lý Staff — Cập nhật trạng thái | `PATCH /api/events/{eventId}/staffs/{staffId}/status` | Required — access token, role `ORGANIZER` | `200 OK` |
-| UC13 | Quản lý Staff — Xóa staff | `DELETE /api/events/{eventId}/staffs/{staffId}` | Required — access token, role `ORGANIZER` | `204 No Content` |
-| UC14 | Xem thống kê sự kiện | `GET /api/events/{eventId}/statistics` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC21 | Quản lý Staff — Danh sách staff | `GET /api/events/{eventId}/staffs` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC21 | Quản lý Staff — Thêm staff | `POST /api/events/{eventId}/staffs` | Required — access token, role `ORGANIZER` | `201 Created` |
+| UC21 | Quản lý Staff — Cập nhật trạng thái | `PATCH /api/events/{eventId}/staffs/{staffId}/status` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC21 | Quản lý Staff — Xóa staff | `DELETE /api/events/{eventId}/staffs/{staffId}` | Required — access token, role `ORGANIZER` | `204 No Content` |
+| UC22 | Xem thống kê sự kiện | `GET /api/events/{eventId}/statistics` | Required — access token, role `ORGANIZER` | `200 OK` |
 | UC24 | Xem doanh thu và số dư ví | `GET /api/organizer/wallet` | Required — access token, role `ORGANIZER` | `200 OK` |
 | UC25 | Tạo yêu cầu rút tiền | `POST /api/organizer/withdrawals` | Required — access token, role `ORGANIZER` | `201 Created` |
 | Hỗ trợ UC25 | Xác nhận / xem trước rút tiền | `POST /api/organizer/withdrawals/preview` | Required — access token, role `ORGANIZER` | `200 OK` |
 | UC26 | Xem lịch sử yêu cầu rút tiền | `GET /api/organizer/withdrawals` | Required — access token, role `ORGANIZER` | `200 OK` |
 | UC27 | Xem chi tiết yêu cầu rút tiền | `GET /api/organizer/withdrawals/{id}` | Required — access token, role `ORGANIZER` | `200 OK` |
 | UC27 | Hủy yêu cầu rút tiền | `POST /api/organizer/withdrawals/{id}/cancel` | Required — access token, role `ORGANIZER` | `200 OK` |
+| Customer Booking | Danh sách loại vé mở bán | `GET /api/bookings/events/{eventId}/ticket-types` | Required — access token, role `CUSTOMER` | `200 OK` |
+| Customer Booking | Đặt vé và giữ chỗ | `POST /api/bookings` | Required — access token, role `CUSTOMER` | `201 Created` |
+| Customer Booking | Tạo URL thanh toán VNPay | `POST /api/bookings/{bookingId}/payments/vnpay` | Required — access token, role `CUSTOMER` | `200 OK` |
+| Customer Booking | Lịch sử đặt vé | `GET /api/bookings` | Required — access token, role `CUSTOMER` | `200 OK` |
+| Customer Booking | Chi tiết đặt vé | `GET /api/bookings/{bookingId}` | Required — access token, role `CUSTOMER` | `200 OK` |
+| Hỗ trợ Booking | IPN callback từ VNPay | `GET /api/payments/vnpay/ipn` | Public — xác thực chữ ký HMAC | `200 OK` |
+| Hỗ trợ Booking | Trang trả về sau thanh toán | `GET /api/payments/vnpay/return` | Public — xác thực chữ ký HMAC | `200 OK` |
+| Customer Tickets | Danh sách vé điện tử | `GET /api/tickets` | Required — access token, role `CUSTOMER` | `200 OK` |
+| UC28 | Xem danh sách sự kiện được phân công | `GET /api/staff/events` | Required — access token, role `STAFF` | `200 OK` |
+| UC29 | Xem chi tiết sự kiện được phân công | `GET /api/staff/events/{eventId}` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Danh sách khách hàng đã đặt vé | `GET /api/staff/events/{eventId}/customers` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Danh sách loại vé sự kiện | `GET /api/staff/events/{eventId}/ticket-types` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Thống kê vé sự kiện | `GET /api/staff/events/{eventId}/stats` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Danh sách vé và bộ lọc soát vé | `GET /api/staff/events/{eventId}/tickets` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Soát vé / Check-in QR (Mobile) | `POST /api/staff/events/{eventId}/check-in` | Required — access token, role `STAFF` | `200 OK` |
 
 ## 3. Đăng ký tài khoản
 
@@ -1193,7 +1208,7 @@ Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở m�
 
 ### 11.12. Transaction, version và thông báo xét duyệt
 
-Quyết định, trạng thái vé và bản ghi `notifications` được lưu trong cùng transaction. Lưu thông báo lỗi thì rollback toàn bộ; không có gửi email hoặc tác vụ delivery ngoài DB. Duyệt/từ chối lặp hoặc đồng thời chỉ một quyết định thành công, một thông báo.
+Quyết định, trạng thái vé và bản ghi `notifications` được lưu trong cùng transaction. Lưu thông báo lỗi thì rollback toàn bộ. Sau commit, backend đẩy SSE đến các phiên web của người nhận. Duyệt/từ chối lặp hoặc đồng thời chỉ một quyết định thành công; mỗi người nhận được một thông báo.
 
 Event dùng `@Version`. Organizer sửa/hủy dùng `PESSIMISTIC_FORCE_INCREMENT`, bảo đảm thay đổi chỉ vé/khách mời cũng tăng version. Admin đọc/xử lý khóa cùng bản ghi, kiểm tra `PENDING_APPROVAL` rồi so version. Khi nhận `404`/`409`, frontend chặn quyết định tiếp cho đến khi đọc lại hồ sơ. Form giữ dữ liệu khi lỗi có thể thử lại, chặn gửi lặp; hủy dialog không gọi API.
 
@@ -1202,13 +1217,13 @@ Event dùng `@Version`. Organizer sửa/hủy dùng `PESSIMISTIC_FORCE_INCREMENT
 V4 thêm version mặc định 0, trạng thái REJECTED và unique index tên danh mục. Không chỉnh V1–V3. Nếu dữ liệu đang có tên trùng sau chuẩn hóa, migration dừng; cần xử lý dữ liệu theo quyết định của nhóm, không tự gộp/xóa.
 AdminIntegrationTests kiểm tra security, tạo user/hash, khóa phiên, danh mục, version, tranh chấp quyết định, rollback thông báo và giới hạn dữ liệu người nhận. Test PostgreSQL chạy trong môi trường riêng theo README.
 
-## 12. Organizer đọc thông báo (Hỗ trợ UC35–36)
+## 12. Thông báo trên web (Admin, Organizer, Customer)
 
 | Mục | Nội dung |
 | --- | --- |
 | **Method + Endpoint** | `GET /api/notifications` |
 | **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
-| **Role được phép sử dụng** | `ORGANIZER` |
+| **Role được phép sử dụng** | `ADMIN`, `ORGANIZER`, `CUSTOMER` |
 | **Path Parameters** | Không có. |
 | **Query Parameters** | `page` (integer, tùy chọn, mặc định 0, không âm), `pageSize` (integer, tùy chọn, mặc định 20, từ 1–100). |
 
@@ -1221,14 +1236,6 @@ Không có.
 **Thành công — `200 OK`:**
 
 ```json
-[
-  {
-    "id": 1,
-    "name": "Âm nhạc",
-    "description": "Sự kiện âm nhạc"
-  }
-]
-```
 {
   "items": [
     {
@@ -1247,7 +1254,29 @@ Không có.
 }
 ```
 
-Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông báo của tài khoản đang đăng nhập, sắp xếp ID giảm dần. Type xét duyệt là `EVENT_APPROVED`/`EVENT_REJECTED`. Danh sách rỗng trả `200` với `items: []`. Endpoint chỉ đọc, chưa đánh dấu thông báo đã đọc; không gửi email.
+Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông báo của tài khoản đang đăng nhập, sắp xếp ID giảm dần. Danh sách rỗng trả `200` với `items: []`; `createdAt` là UTC.
+
+### Trạng thái đọc và SSE
+
+| Method + Endpoint | Kết quả |
+| --- | --- |
+| `GET /api/notifications/unread-count` | `200`, JSON number là số chưa đọc của tài khoản hiện tại. |
+| `PATCH /api/notifications/{id}/read` | `204`, đánh dấu đã đọc; gọi lại vẫn thành công. ID không tồn tại hoặc thuộc tài khoản khác trả `404 NOTIFICATION_NOT_FOUND`. |
+| `PATCH /api/notifications/read-all` | `204`, đánh dấu tất cả thông báo hiện tại đã đọc. |
+| `GET /api/notifications/stream` | `200 text/event-stream`, xác thực bằng cookie; chỉ nhận thay đổi của chính tài khoản. |
+
+Mọi PATCH cần `X-CSRF-Protection: 1`. Kết nối SSE khác origin cần `withCredentials: true` và origin được backend cho phép. Stream gửi `connected` khi kết nối, `notifications-changed` sau khi tạo/đánh dấu đọc đã commit và heartbeat mỗi 25 giây. SSE chỉ báo cần tải lại dữ liệu; frontend lấy danh sách/số chưa đọc qua REST. Mỗi kết nối tồn tại tối đa 120 giây, frontend tự kết nối lại với backoff tối đa 30 giây và đồng bộ lại DB. Phiên hết hạn/thu hồi hoặc tài khoản bị khóa sẽ bị đóng stream.
+
+Thông báo phát sinh từ các nghiệp vụ hiện có:
+
+- Admin ACTIVE nhận sự kiện mới, cập nhật chờ duyệt và yêu cầu hủy.
+- Organizer nhận kết quả xét duyệt và booking đã xác nhận.
+- Customer nhận thông báo khi vé được phát hành thành công (vé miễn phí hoặc IPN VNPay hợp lệ).
+- Customer có booking PAID nhận cập nhật, yêu cầu hủy và kết quả xét duyệt của sự kiện liên quan. Yêu cầu hủy được mô tả là đang chờ xét duyệt, chưa phải sự kiện đã hủy.
+
+STAFF tạm thời không nhận thông báo mới và không được truy cập các REST API/SSE thông báo (`403 FORBIDDEN`).
+
+DB là nguồn dữ liệu chính: đóng web/mất mạng vẫn lưu thông báo, mở lại sẽ tải qua REST. SSE dùng bộ nhớ của một instance backend; triển khai nhiều instance cần bổ sung cơ chế chia sẻ sự kiện. Không thêm email, FCM hoặc Kafka.
 
 ### Mã lỗi
 
@@ -1255,7 +1284,7 @@ Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông
 | --- | --- | --- |
 | `400` | `INVALID_PAGE` / `INVALID_REQUEST` | Phân trang không hợp lệ. |
 | `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
-| `403` | `FORBIDDEN` | Sai role. |
+| `403` | `FORBIDDEN` | Sai role hoặc PATCH thiếu CSRF header. |
 
 Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
 
@@ -1711,3 +1740,210 @@ Nhà tổ chức hủy yêu cầu rút tiền khi yêu cầu đang ở trạng t
 | `404` | `NOT_FOUND` | Không tìm thấy yêu cầu rút tiền với ID đã chỉ định hoặc yêu cầu không thuộc về Organizer này. |
 | `401` | `UNAUTHORIZED` | Chưa đăng nhập hoặc phiên làm việc đã hết hạn. |
 | `403` | `FORBIDDEN` | Tài khoản không có role `ORGANIZER` hoặc tài khoản bị khóa (`LOCKED`). |
+
+
+<a id="customer-booking-api"></a>
+
+## 22. Customer Booking API
+
+Các endpoint `/api/bookings/**` yêu cầu cookie đăng nhập, tài khoản ACTIVE và role CUSTOMER. Mọi POST phải có `X-CSRF-Protection: 1`; frontend khác origin dùng `credentials: "include"`. Customer lấy từ principal, không nhận `userId`, giá tiền hoặc trạng thái do client quyết định. Thời gian trong JSON là UTC; số tiền dùng VND và BigDecimal.
+
+| Method | Endpoint | Chức năng |
+| --- | --- | --- |
+| GET | `/api/bookings/events/{eventId}/ticket-types` | Danh sách loại vé ACTIVE của sự kiện APPROVED, giá, số lượng còn lại và `bookable` |
+| POST | `/api/bookings` | Đặt vé, giữ số lượng và trả chi tiết booking (`201`) |
+| POST | `/api/bookings/{bookingId}/payments/vnpay` | Tạo/lấy lại URL VNPay Sandbox (`200`, không cần body) |
+| GET | `/api/bookings?page=0&size=20` | Lịch sử booking của customer, mới nhất trước |
+| GET | `/api/bookings/{bookingId}` | Chi tiết booking, items, vé và các lần thanh toán |
+| GET | `/api/payments/vnpay/ipn` | VNPay server gọi để xác nhận thanh toán, xác thực bằng chữ ký |
+| GET | `/api/payments/vnpay/return` | Kiểm tra chữ ký và hiển thị kết quả quay về, không cập nhật booking |
+
+### Đặt vé
+
+```json
+{
+  "eventId": 42,
+  "items": [
+    { "ticketTypeId": 7, "quantity": 2 },
+    { "ticketTypeId": 8, "quantity": 1 }
+  ]
+}
+```
+
+Sự kiện phải APPROVED và chưa bắt đầu; vé ACTIVE, đã mở bán và chưa đóng bán. Mỗi loại vé chỉ xuất hiện một lần, thuộc đúng sự kiện, quantity từ 1–100; tối đa 20 loại và 100 vé trong một booking. Backend lưu `unitPrice` tại lúc đặt vé và tự tính tổng. Không đủ vé trả `409`, không tạo booking dở dang.
+
+Ví dụ response `201` rút gọn:
+
+```json
+{
+  "id": 120,
+  "status": "PENDING",
+  "totalAmount": 450000.00,
+  "currency": "VND",
+  "createdAt": "2026-10-12T12:00:00",
+  "expiredAt": "2026-10-12T12:15:00",
+  "event": { "id": 42, "name": "EventHub Live", "city": "Hồ Chí Minh", "address": "Địa điểm sự kiện" },
+  "items": [
+    { "id": 201, "ticketTypeId": 7, "ticketTypeName": "Standard", "quantity": 2, "unitPrice": 150000.00, "subtotal": 300000.00, "tickets": [] },
+    { "id": 202, "ticketTypeId": 8, "ticketTypeName": "Early Bird", "quantity": 1, "unitPrice": 150000.00, "subtotal": 150000.00, "tickets": [] }
+  ],
+  "payments": []
+}
+```
+
+`event` đầy đủ còn có `thumbnailImageUrl`, `status`, `startTime`, `endTime`. Booking giữ vé mặc định 15 phút, rút ngắn nếu sắp đóng bán hoặc sự kiện bắt đầu. Vé giữ được trừ khỏi `remainingQuantity` và cộng vào `reservedQuantity`; thanh toán thành công chỉ giảm reserved, hết hạn trả reserved về remaining. Booking miễn phí chuyển PAID và phát vé ngay, payment có `paymentMethod: "FREE"`.
+
+### Thanh toán
+
+Gọi `POST /api/bookings/120/payments/vnpay`, response:
+
+```json
+{
+  "bookingId": 120,
+  "paymentId": 51,
+  "transactionId": "merchant-reference-unique-per-attempt",
+  "paymentUrl": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?...",
+  "expiredAt": "2026-10-12T12:15:00"
+}
+```
+
+Frontend chuyển trình duyệt đến `paymentUrl`. Gọi lại trong khi cùng payment đang PENDING và chưa đến expiredAt trả cùng reference/URL. Nếu payment thất bại, có thể tạo lần thử mới trước expiredAt; không thanh toán lại booking PAYMENT_CONFIRMING/PAID/EXPIRED/PAYMENT_REVIEW. Số tiền VNPay lấy từ booking, nhân 100 theo giao thức; vượt giới hạn 12 chữ số của `vnp_Amount` trả `400` và rollback lần tạo payment.
+
+Callback chỉ chấp nhận HMAC-SHA512 hợp lệ, đúng merchant/reference/số tiền. Phải đồng thời có `vnp_ResponseCode=00` và `vnp_TransactionStatus=00` mới thành công. IPN lưu payment và phát vé trong cùng transaction; IPN lặp không phát thêm vé. Chỉ GET IPN/return được công khai và dùng chữ ký thay phiên đăng nhập; các API customer vẫn giữ xác thực và CSRF hiện tại.
+
+IPN trả JSON theo quy định VNPay (tên trường bên ngoài giữ nguyên):
+
+```json
+{ "RspCode": "00", "Message": "Confirm Success" }
+```
+
+| RspCode | Ý nghĩa |
+| --- | --- |
+| `00` | Đã ghi nhận kết quả vào DB, gồm cả giao dịch bị từ chối/hủy |
+| `02` | Lần thanh toán đã được xử lý trước đó |
+| `01` | Không tìm thấy giao dịch |
+| `04` | Số tiền sai |
+| `97` | Chữ ký/merchant sai hoặc query parameter bị lặp |
+| `99` | Tham số kết quả không hợp lệ hoặc lưu DB thất bại; VNPay có thể retry |
+
+Return URL trả `bookingId`, `bookingStatus`, `paymentStatus`, `responseCode`, `transactionStatus`. `responseCode=00` ở trang quay về chưa đảm bảo backend đã nhận IPN. Frontend đọc lại `GET /api/bookings/{bookingId}` cho đến khi backend xác nhận; chỉ hiển thị vé khi booking PAID.
+
+Booking có payment VNPay PENDING được giữ thêm BOOKING_IPN_GRACE_PERIOD (mặc định 120 giây) sau expiredAt để chờ IPN. VNPay vẫn nhận vnp_ExpireDate theo expiredAt ban đầu. IPN thành công chỉ phát vé khi vnp_PayDate <= expiredAt, booking vẫn giữ vé, sự kiện APPROVED và backend xử lý trước expiredAt + khoảng chờ. Nếu thanh toán sau hạn ban đầu, IPN quá hạn chờ (kể cả job chưa chạy), vé đã được giải phóng hoặc sự kiện đã chuyển khỏi APPROVED, backend lưu payment SUCCESS và booking PAYMENT_REVIEW, không phát vé; cần đối soát/hoàn tiền. Chưa có API hoàn tiền trong tính năng này.
+
+### Lịch sử và chi tiết
+
+Lịch sử trả `{ "items": [...], "page": 0, "size": 20, "totalElements": 2, "totalPages": 1 }`. Mỗi summary có `id`, `status`, `totalAmount`, `currency`, `createdAt`, `expiredAt`, `event`. `page >= 0`, `size` từ 1–50. Sắp xếp createdAt rồi id giảm dần; danh sách rỗng trả `200` và `items: []`.
+
+Chi tiết trả cùng cấu trúc response đặt vé, bổ sung trong mỗi item danh sách `tickets`: `id`, `ticketCode`, `qrToken`, `status`, `checkedInAt`. QR token là dữ liệu để frontend tạo ảnh QR, chỉ xuất hiện trong chi tiết của chủ booking. `payments` trả `id`, `transactionId` (reference của backend), `gatewayTransactionId` (mã VNPay), `paymentMethod`, `amount`, `status`, `responseCode`, `createdAt`, `paidAt`; lần thử mới nhất trước. Giá trong items là giá lúc đặt, không bị thay đổi khi Organizer sửa giá vé.
+
+| Booking status | Ý nghĩa |
+| --- | --- |
+| `PENDING` | Đang giữ vé và chờ thanh toán |
+| `PAYMENT_CONFIRMING` | Đã hết hạn thanh toán, đang giữ vé thêm để chờ IPN; không tạo thanh toán mới |
+| `PAID` | Đã xác nhận và phát vé VALID |
+| `EXPIRED` | Hết thời hạn thanh toán; không thể tiếp tục trả tiền |
+| `PAYMENT_REVIEW` | Đã nhận tiền nhưng không thể phát vé an toàn, chờ đối soát |
+
+Lịch sử/chi tiết trả thêm paymentConfirmationDeadline (UTC), bằng expiredAt + khoảng chờ khi booking còn PENDING và có payment VNPay PENDING, còn lại null. PAYMENT_CONFIRMING chỉ là trạng thái hiển thị của API; trong database vẫn giữ PENDING, không thêm migration. Khi now >= expiredAt: có payment đang chờ và now < paymentConfirmationDeadline thì hiển thị PAYMENT_CONFIRMING; còn lại EXPIRED. Return API cũng trả bookingStatus theo quy tắc này. FE tiếp tục đọc lại booking trong khoảng chờ, không thông báo hết hạn hoặc cho thanh toán lại sớm.
+
+Job giải phóng kho mặc định mỗi 30 giây, và thao tác tạo booking cũng dọn tối đa 500 booking đủ điều kiện hết hạn của cùng sự kiện. Cả hai bỏ qua booking còn trong khoảng chờ. Khi đến đúng paymentConfirmationDeadline mới được giải phóng vé; nếu không có payment đang chờ thì giải phóng ngay từ expiredAt. IPN thất bại trong khoảng chờ cũng giải phóng vé ngay. Mỗi đợt job xử lý tối đa 100 sự kiện, mỗi sự kiện 500 booking, rồi tiếp tục ở đợt sau.
+
+### Vé điện tử / QR của customer
+
+| API | Quyền | Mô tả |
+| --- | --- | --- |
+| `GET /api/tickets?page=0&size=20&bookingId=120&status=VALID` | CUSTOMER | Các filter bookingId/status là tùy chọn, size 1–50; chỉ trả vé của chủ tài khoản |
+
+Danh sách vé trả `{items,page,size,totalElements,totalPages}`. Mỗi vé có `id`, `bookingId`, `ticketCode`, `qrToken`, `status`, `ticketTypeName`, `unitPrice`, `ownerName`, `checkedInAt`, `canCheckIn`, `event`. Dữ liệu ngày giờ không có offset là UTC. FE hiển thị theo Asia/Ho_Chi_Minh. QR chỉ có giá trị khi `canCheckIn=true`; vé USED hoặc sự kiện không còn hiệu lực trả `qrToken:null`.
+
+API này chỉ đọc vé của customer. Chức năng quét và cập nhật check-in dành cho staff/organizer không nằm trong phạm vi triển khai.
+
+### Lỗi HTTP
+
+| HTTP | Trường hợp |
+| --- | --- |
+| `400` | Body/ID/phân trang không hợp lệ, loại vé sai sự kiện/trùng, quá giới hạn, callback return sai chữ ký |
+| `401` | Chưa đăng nhập, phiên hết hạn hoặc tài khoản không còn ACTIVE |
+| `403` | Sai role hoặc thiếu `X-CSRF-Protection: 1` trên POST |
+| `404` | Booking không tồn tại hoặc thuộc customer khác; sự kiện không tồn tại hoặc chưa thể xem danh sách vé |
+| `409` | Hết vé, đóng bán, sự kiện không thể đặt, booking không thể thanh toán |
+| `503` | Chưa cấu hình merchant/secret VNPay Sandbox hợp lệ |
+
+Lỗi dùng `GlobalExceptionHandler` hiện tại (`REQUEST_ERROR`, `VALIDATION_ERROR`, `INVALID_REQUEST`, ...). Cấu hình môi trường Sandbox và IPN công khai xem [README](README.md#customer-booking-và-vnpay-sandbox); tham khảo giao thức trong [tài liệu VNPay PAY](https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html).
+
+---
+
+## 23. Phân hệ Nhân viên soát vé — UC28 & UC29 (Staff Portal APIs)
+
+Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) phục vụ **UC28 (Xem danh sách sự kiện được phân công)** và **UC29 (Xem chi tiết sự kiện được phân công)**, bao gồm tra cứu sự kiện, kiểm tra danh sách vé, bộ lọc vé, thống kê soát vé và thực hiện check-in.
+
+### 23.1. UC28 — Xem danh sách sự kiện được phân công
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Query Parameters** | `date` (tùy chọn, format YYYY-MM-DD), `status` (tùy chọn: `APPROVED`, `ONGOING`, `COMPLETED`) |
+| **Response** | `200 OK` — `List<StaffAssignedEventResponse>` (`eventId`, `eventName`, `thumbnailImageUrl`, `bannerImageUrl`, `startTime`, `endTime`, `eventStatus`, `venueName`, `venueAddress`, `staffStatus`, `assignedAt`, `checkedInTickets`, `totalPaidTickets`, `checkInRate`) |
+
+### 23.2. UC29 — Xem chi tiết sự kiện được phân công
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events/{eventId}` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` (chỉ xem được sự kiện mình được phân công) |
+| **Response** | `200 OK` — `StaffEventDetailDto` đầy đủ thông tin sự kiện, địa điểm, ban tổ chức, sơ đồ `imageZoneUrl`, và trạng thái phân công `staffStatus`. |
+
+### 23.3. Hỗ trợ UC29 — Danh sách khách hàng đã đặt vé
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events/{eventId}/customers` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Mô tả** | Truy vấn danh sách khách hàng có booking `PAID` của sự kiện để gán vào thanh lọc (select box) tại giao diện chi tiết sự kiện. |
+| **Response** | `200 OK` — `List<StaffCustomerDto>` (`id`, `fullName`, `email`, `phone`, `ticketCount`) |
+
+### 23.4. Hỗ trợ UC29 — Danh sách loại vé sự kiện
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events/{eventId}/ticket-types` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Mô tả** | Trả về danh sách loại vé (Standard, VIP, Early Bird, ...) để gán vào select box lọc loại vé. |
+| **Response** | `200 OK` — `List<StaffTicketTypeDto>` (`id`, `name`, `price`, `quantity`) |
+
+### 23.5. Hỗ trợ UC29 — Thống kê vé sự kiện
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events/{eventId}/stats` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Response** | `200 OK` — `StaffTicketStatsDto` (`totalTickets`, `checkedInTickets`, `remainingTickets`, `checkInRate`) |
+
+### 23.6. Hỗ trợ UC29 — Danh sách vé theo bộ lọc và phân trang
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `GET /api/staff/events/{eventId}/tickets` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Query Parameters** | `customerId` (tùy chọn), `ticketTypeId` (tùy chọn), `status` (tùy chọn: `CHECKED_IN`, `NOT_CHECKED_IN`), `page` (default `0`), `size` (default `20`) |
+| **Response** | `200 OK` — `StaffTicketPageResponse` (`content: List<StaffTicketDto>`, `pageNumber`, `pageSize`, `totalElements`, `totalPages`, `last`) |
+
+### 23.7. Hỗ trợ UC29 (Mobile App) — Check-in vé tại cổng
+
+| Mục | Nội dung |
+| --- | --- |
+| **Method + Endpoint** | `POST /api/staff/events/{eventId}/check-in` |
+| **Authentication** | Required — access token qua HttpOnly Cookie |
+| **Role** | `STAFF` |
+| **Header** | `X-CSRF-Protection: 1` |
+| **Request Body** | `{ "ticketCode": "TIC-123456", "qrToken": "..." }` (hoặc ticketId) |
+| **Response** | `200 OK` — `{ "success": true, "message": "Check-in thành công", "ticketId": 123, "checkedInAt": "..." }` |
+| **Lỗi** | `400` Vé không hợp lệ / sai sự kiện; `409` Vé đã được check-in trước đó. |
+| **Lưu ý** | Giao diện Web hiển thị chế độ giám sát và tra cứu (chỉ đọc); chức năng quét mã check-in thực tế được vận hành qua ứng dụng di động (Mobile App). |

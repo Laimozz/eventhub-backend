@@ -3,7 +3,6 @@ package com.eventhub.backend.service;
 import com.eventhub.backend.dto.response.AdminResponses.*;
 import com.eventhub.backend.dto.response.EventResponse;
 import com.eventhub.backend.entity.Event;
-import com.eventhub.backend.entity.Notification;
 import com.eventhub.backend.enums.EventStatus;
 import com.eventhub.backend.exception.AdminException;
 import com.eventhub.backend.repository.*;
@@ -22,7 +21,7 @@ public class AdminEventReviewService {
     private final TicketTypeRepository tickets;
     private final EventGuestRepository guests;
     private final UserRepository users;
-    private final NotificationRepository notifications;
+    private final NotificationService notifications;
     private final Clock clock;
 
     @Transactional(readOnly = true)
@@ -51,13 +50,11 @@ public class AdminEventReviewService {
         event.setRejectReason(reason);
         tickets.findForUpdate(id).forEach(ticket -> ticket.setStatus(approved ? "ACTIVE" : "INACTIVE"));
         events.saveAndFlush(event);
-        Notification notification = new Notification();
-        notification.setUser(event.getOrganizer());
-        notification.setTitle("Sự kiện #" + id + (approved ? " đã được duyệt" : " bị từ chối"));
-        notification.setType(approved ? "EVENT_APPROVED" : "EVENT_REJECTED");
-        // Existing notification content is VARCHAR(255); preserve the complete rejection reason.
-        notification.setContent(approved ? "Sự kiện #" + id + " đã được phê duyệt." : reason);
-        notifications.saveAndFlush(notification);
+        String title = "Sự kiện #" + id + (approved ? " đã được duyệt" : " bị từ chối");
+        String content = approved ? "Sự kiện #" + id + " đã được phê duyệt." : reason;
+        String type = approved ? "EVENT_APPROVED" : "EVENT_REJECTED";
+        notifications.create(event.getOrganizer(), title, content, type);
+        notifications.notifyEventParticipants(id, title, content, type);
         return new ReviewResponse(id, event.getStatus(), adminId, event.getReviewedAt(), reason, event.getVersion());
     }
 

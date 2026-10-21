@@ -21,9 +21,17 @@ Hiện tại dự án có entity/repository, migration Flyway và kiểm thử t
 - Danh mục có tên duy nhất không phân biệt hoa/thường sau trim; không xóa nếu có sự kiện tham chiếu.
 - Duyệt chuyển PENDING_APPROVAL → APPROVED, vé ACTIVE; từ chối chuyển REJECTED, vé INACTIVE và lưu lý do tối đa 255 ký tự. Người/thời gian xử lý lấy từ server.
 - Version và khóa bản ghi bảo vệ quyết định đồng thời hoặc dựa trên nội dung cũ. Luồng Organizer sửa/hủy dùng cùng khóa; sửa chỉ khách mời/vé cũng tăng version.
-- Thông báo lưu cùng transaction, Organizer đọc qua GET /api/notifications và thấy rejectReason ở chi tiết sự kiện. Không có email; lỗi lưu thông báo rollback quyết định để thử lại.
+- Thông báo dùng bảng PostgreSQL hiện có cho ADMIN/ORGANIZER/CUSTOMER: danh sách, số chưa đọc, đánh dấu đọc và SSE `/api/notifications/stream`. STAFF tạm thời không sử dụng tính năng thông báo. Lưu cùng transaction nghiệp vụ, chỉ đẩy SSE sau commit; FE tải lại DB khi mở web/kết nối lại. Xem [API thông báo](api-endpoints.md#12-thông-báo-trên-web-admin-organizer-customer).
 - Flyway V4 thêm version, REJECTED và unique index danh mục. Nếu có tên trùng sau chuẩn hóa, migration dừng; xử lý dữ liệu có chủ đích trước khi chạy lại, không tự gộp/xóa.
 - Dùng JDK21 khi chạy Maven. AdminIntegrationTests kiểm tra API thật trên PostgreSQL test riêng. Không chạy migration/test vào DB nghiệp vụ.
+
+### Phân hệ Nhân viên soát vé UC28–29 (Staff)
+
+- Cung cấp REST API cho Staff (`/api/staff/**`) có bảo vệ bằng Spring Security với `hasRole('STAFF')`.
+- **UC28 — Xem danh sách sự kiện được phân công**: `GET /api/staff/events` hỗ trợ lọc theo ngày ca trực và trạng thái sự kiện.
+- **UC29 — Xem chi tiết sự kiện được phân công**: `GET /api/staff/events/{eventId}`, kèm các API hỗ trợ danh sách khách hàng (`/customers`), loại vé (`/ticket-types`), thống kê số liệu soát vé (`/stats`), và danh sách vé phân trang (`/tickets`).
+- Toàn bộ câu truy vấn dữ liệu soát vé sử dụng `@Query(..., nativeQuery = true)` chuẩn SQL tối ưu hiệu năng.
+- Chi tiết xem [Tài liệu API Phân hệ Nhân viên soát vé](api-endpoints.md#17-phân-hệ-nhân-viên-soát-vé--uc28--uc29-staff-portal-apis).
 
 ## 2. Chuẩn bị và chạy dự án
 
@@ -126,6 +134,46 @@ Có thể thay đổi bằng biến môi trường tương ứng hoặc cấu h�
 
 Frontend cần gửi credentials và header `X-CSRF-Protection: 1` khi gọi POST. Không cần endpoint lấy CSRF token. Chi tiết 4 endpoint, rotation và ví dụ Fetch nằm trong [api-endpoints.md](api-endpoints.md).
 
+### Customer booking và VNPay Sandbox
+
+Đã có API đặt vé, thanh toán, lịch sử và chi tiết booking cho CUSTOMER. Xem request/response và luồng frontend tại [Customer Booking API](api-endpoints.md#customer-booking-api).
+
+- Giá vé và customer lấy từ backend/phiên đăng nhập. Cấu hình hiện tại giữ vé 5 phút, tối đa đến lúc đóng bán hoặc bắt đầu sự kiện. Booking có payment VNPay PENDING được giữ thêm 120 giây để chờ IPN; hạn bắt đầu/thực hiện thanh toán không thay đổi. Job chạy mỗi 30 giây trả vé đủ điều kiện hết hạn về kho; khóa PostgreSQL bảo vệ khi nhiều người đặt/thanh toán đồng thời.
+- VNPay Sandbox dùng HMAC-SHA512, kiểm tra merchant, số tiền và mã giao dịch. IPN cập nhật payment và phát một vé/mã QR token cho mỗi vé đã mua trong cùng transaction. Return URL chỉ hiển thị kết quả; frontend đọc lại booking để biết trạng thái đã xác nhận.
+- Booking tổng tiền bằng 0 được xác nhận và phát vé ngay, phương thức `FREE`. Booking có IPN thành công sau khi đã trả vé về kho hoặc khi sự kiện không còn APPROVED chuyển `PAYMENT_REVIEW`, lưu payment thành công để đối soát; chưa có API hoàn tiền trong phạm vi này.
+- Flyway V6 chỉ thêm hai cột payment và index, giữ nguyên bảng/dữ liệu và migration cũ. Chưa cấu hình VNPay thì tính năng khác vẫn khởi động, riêng tạo URL thanh toán trả `503`.
+
+Đăng ký merchant tại [VNPay Sandbox](https://sandbox.vnpayment.vn/devreg/), rồi cấu hình qua biến môi trường hoặc `application-local.properties` đã được Git bỏ qua:
+
+```properties
+app.vnpay.tmn-code=YOUR_SANDBOX_TMN_CODE
+app.vnpay.hash-secret=YOUR_SANDBOX_HASH_SECRET
+app.vnpay.return-url=http://localhost:5173/customer/payment-result
+```
+
+| Biến môi trường | Mặc định / ý nghĩa |
+| --- | --- |
+| `VNPAY_TMN_CODE` | Trống; mã merchant Sandbox được VNPay cấp |
+| `VNPAY_HASH_SECRET` | Trống; khóa Sandbox, chỉ lưu ở backend |
+| `VNPAY_PAYMENT_URL` | `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html` |
+| `VNPAY_RETURN_URL` | `http://localhost:5173/customer/payment-result` |
+| `BOOKING_HOLD_TTL` | `5m` trong application.properties; chấp nhận từ 1–30 phút, số giây nguyên |
+| `BOOKING_IPN_GRACE_PERIOD` | `120s`; thời gian giữ thêm khi chờ IPN, 0–300 giây nguyên; `0s` tắt khoảng chờ |
+| `BOOKING_EXPIRY_ENABLED` | `true`; bật job giải phóng vé hết hạn |
+| `BOOKING_EXPIRY_DELAY` | `30s`; khoảng cách giữa các lần chạy job |
+
+Khai báo IPN URL `https://YOUR_PUBLIC_BACKEND/api/payments/vnpay/ipn` với VNPay; cần địa chỉ HTTPS công khai để VNPay gọi server của bạn. Có thể dùng HTTPS tunnel trỏ về backend local khi thử nghiệm. IPN URL được đăng ký ở merchant, không truyền thêm vào request tạo URL. Return URL mặc định trỏ về FE `/customer/payment-result`; FE gửi nguyên query VNPay sang `GET /api/payments/vnpay/return` để kiểm tra chữ ký, rồi đọc lại booking cho đến khi IPN xác nhận PAID. Khi deploy cần đặt `VNPAY_RETURN_URL` theo domain FE thực tế. Tham khảo [tài liệu tích hợp PAY chính thức](https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html).
+
+Khi hết hạn thanh toán nhưng vẫn đang chờ IPN, API trả trạng thái hiển thị `PAYMENT_CONFIRMING` cùng `paymentConfirmationDeadline = expiredAt + BOOKING_IPN_GRACE_PERIOD`. Trong database booking vẫn PENDING để bảo toàn phần giữ vé. Cả job và thao tác tạo booking mới đều không thu hồi vé trong khoảng này. Đến đúng hạn chờ, API trả EXPIRED và booking đủ điều kiện giải phóng vé. IPN thành công chỉ phát vé nếu thời gian thanh toán VNPay không muộn hơn expiredAt và được xử lý trước hạn chờ; quá hạn chờ chuyển PAYMENT_REVIEW kể cả khi job chưa chạy. Không thêm cột hoặc migration cho khoảng chờ.
+
+### Vé điện tử của customer
+
+Customer gọi `GET /api/tickets` (có phân trang, lọc `bookingId`, `status=VALID|USED`) để xem vé của mình. FE tạo ảnh QR từ `qrToken`; không dùng `ticketCode` để check-in. Vé đã dùng hoặc không còn được phép vào cửa không trả QR trong danh sách vé.
+
+Phần customer chỉ cung cấp API xem vé, mã QR và trạng thái vé. Khi vé có trạng thái USED, API ẩn mã QR; không triển khai API quét hoặc check-in cho staff/organizer trong phạm vi này.
+
+Kiểm thử riêng phần mới: `.\mvnw.cmd "-Dtest=BookingIntegrationTests,ApplicationPropertiesTest" test`. Dùng Docker hoặc chế độ database test external theo hướng dẫn bên dưới; test ký callback bằng khóa test riêng, không liên hệ VNPay hoặc tạo thanh toán thật.
+
 ### Entity và migration
 
 - Entity: `src/main/java/com/eventhub/backend/entity/`; repository: `src/main/java/com/eventhub/backend/repository/`.
@@ -150,7 +198,7 @@ Frontend cần gửi credentials và header `X-CSRF-Protection: 1` khi gọi POS
 
 ### Tạo sự kiện
 
-`POST /api/events` dành cho `ORGANIZER`, lưu địa điểm mới, sự kiện, loại vé và khách mời (nếu có) trong cùng transaction. Danh mục được chọn bằng `categoryId` đã tồn tại. Sự kiện mới luôn là `PENDING_APPROVAL` để Admin xét duyệt qua [API quản trị](api-endpoints.md#admin-api). Hệ thống có một Admin: khi có Admin ACTIVE, tạo một thông báo chưa đọc `EVENT_PENDING_APPROVAL` trong cùng transaction; nếu chưa có Admin ACTIVE, sự kiện vẫn nằm trong hàng chờ duyệt. Thông báo chỉ hiển thị nội dung, dùng bảng hiện tại với `users_id`. Loại vé khởi tạo `INACTIVE`, số vé giữ chỗ bằng 0 và số vé còn lại bằng số lượng. Chi tiết request, validation và các trạng thái nằm trong [tài liệu API](api-endpoints.md#7-tạo-sự-kiện).
+`POST /api/events` dành cho `ORGANIZER`, lưu địa điểm mới, sự kiện, loại vé và khách mời (nếu có) trong cùng transaction. Danh mục được chọn bằng `categoryId` đã tồn tại. Sự kiện mới luôn là `PENDING_APPROVAL` để Admin xét duyệt qua [API quản trị](api-endpoints.md#admin-api). Mỗi Admin ACTIVE nhận một thông báo chưa đọc `EVENT_PENDING_APPROVAL` trong cùng transaction; nếu chưa có Admin ACTIVE, sự kiện vẫn nằm trong hàng chờ duyệt. Thông báo chỉ hiển thị nội dung, dùng bảng hiện tại với `users_id`. Loại vé khởi tạo `INACTIVE`, số vé giữ chỗ bằng 0 và số vé còn lại bằng số lượng. Chi tiết request, validation và các trạng thái nằm trong [tài liệu API](api-endpoints.md#7-tạo-sự-kiện).
 
 Form frontend dùng `GET /api/categories` để lấy danh mục trong DB. Ảnh được xem trước tại trình duyệt, chưa upload khi chọn file. Khi gửi duyệt, frontend gọi API duy nhất `POST /api/events` trong `EventController` với multipart gồm JSON sự kiện và các file ảnh (mỗi file PNG/JPEG tối đa 5 MB, 20 megapixel; tổng request tối đa 50 MB). Request JSON chỉ chứa thông tin sự kiện, vé và khách mời; không nhận URL ảnh từ client, không hỗ trợ body JSON riêng. Backend kiểm tra toàn bộ dữ liệu/file, lưu và flush hồ sơ trong transaction trước khi gọi [Cloudinary Upload API](https://cloudinary.com/documentation/image_upload_api_reference) bằng Spring RestClient hiện có. Sau khi upload, cập nhật URL HTTPS (`secure_url`) vào các cột ảnh hiện có rồi commit; response trả hồ sơ và URL. `EventService` xử lý tạo hồ sơ và transaction, `EventImageService` xử lý ảnh và Cloudinary. Không có endpoint upload ảnh riêng, thư mục lưu ảnh hoặc API đọc ảnh local.
 
