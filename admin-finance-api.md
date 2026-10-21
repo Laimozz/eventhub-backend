@@ -40,7 +40,7 @@ PENDING/APPROVED/REJECTED là tên kỹ thuật cho trạng thái Chờ duyệt/
 { "transactionCode": "<mã ngân hàng của chuyển khoản đã thực hiện ngoài hệ thống>" }
 ```
 
-Mã bắt buộc, trim, tối đa 255 ký tự. Admin chỉ gọi **sau khi chuyển khoản ngoài hệ thống**, theo DOCX. API không gửi lệnh chuyển tiền, không tự xác minh giao dịch tại ngân hàng.
+Mã bắt buộc, trim, tối đa 255 ký tự. Admin chỉ gọi **sau khi chuyển khoản ngoài hệ thống**, theo hợp đồng API hiện tại được giữ lại trong kế hoạch đã duyệt. File phân công DOCX chỉ nêu tên UC41, không quy định cơ chế chuyển khoản. API không gửi lệnh chuyển tiền, không tự xác minh giao dịch tại ngân hàng.
 
 Trong transaction: khóa request và ví; chỉ PENDING, khoản giữ đủ, chưa có payout cần đối soát; trừ withdrawalPendingBalance, cộng totalWithdrawn, giữ availableBalance; lưu request APPROVED, processedBy/processedAt từ principal/server, mã chuyển khoản, payout COMPLETED và notification WITHDRAWAL_APPROVED. initiatedAt/completedAt của payout là lúc ghi nhận tại hệ thống. Response 200 là chi tiết request cập nhật.
 

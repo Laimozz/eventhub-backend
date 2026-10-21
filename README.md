@@ -15,6 +15,10 @@ Backend của dự án EventHub, sử dụng Java 21, Spring Boot và Maven. REA
 
 Hiện tại dự án có entity/repository, migration Flyway và kiểm thử tích hợp PostgreSQL. API gồm xác thực bằng JWT qua HttpOnly Cookie; Organizer quản lý sự kiện; Admin quản lý người dùng/danh mục và xét duyệt UC31–36. Xem [tài liệu API](api-endpoints.md) và [API quản trị](api-endpoints.md#admin-api).
 
+### Tài chính Admin UC37–UC42
+
+Đã có API thống kê số lượng/số dư, đọc đối soát sự kiện CANCELED và danh sách/chi tiết/duyệt/từ chối yêu cầu rút tiền. Hợp đồng ở [admin-finance-api.md](admin-finance-api.md). Doanh thu vẫn null; chưa có API thực hiện hoàn tiền, provider/retry hoặc bước duyệt hủy chính thức. UC41 ghi nhận chuyển khoản đã thực hiện bên ngoài. Các phụ thuộc và trạng thái triển khai được theo dõi tại `../plan.md`.
+
 ### Quản trị UC31–36
 
 - Admin tạo CUSTOMER/ORGANIZER, tìm/lọc và khóa/mở tài khoản; không tự khóa, không tạo thêm Admin/Staff. Auth kiểm tra trạng thái DB cả access và refresh.
