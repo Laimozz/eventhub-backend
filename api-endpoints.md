@@ -38,6 +38,32 @@ X-CSRF-Protection: 1
 | UC35 | Duyệt sự kiện | `POST /api/admin/events/{eventId}/approve` | Required — access token, role `ADMIN` | `200 OK` |
 | UC36 | Từ chối sự kiện | `POST /api/admin/events/{eventId}/reject` | Required — access token, role `ADMIN` | `200 OK` |
 | Hỗ trợ UC35–36 | Organizer đọc thông báo | `GET /api/notifications` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC21 | Quản lý Staff — Danh sách staff | `GET /api/events/{eventId}/staffs` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC21 | Quản lý Staff — Thêm staff | `POST /api/events/{eventId}/staffs` | Required — access token, role `ORGANIZER` | `201 Created` |
+| UC21 | Quản lý Staff — Cập nhật trạng thái | `PATCH /api/events/{eventId}/staffs/{staffId}/status` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC21 | Quản lý Staff — Xóa staff | `DELETE /api/events/{eventId}/staffs/{staffId}` | Required — access token, role `ORGANIZER` | `204 No Content` |
+| UC22 | Xem thống kê sự kiện | `GET /api/events/{eventId}/statistics` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC24 | Xem doanh thu và số dư ví | `GET /api/organizer/wallet` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC25 | Tạo yêu cầu rút tiền | `POST /api/organizer/withdrawals` | Required — access token, role `ORGANIZER` | `201 Created` |
+| Hỗ trợ UC25 | Xác nhận / xem trước rút tiền | `POST /api/organizer/withdrawals/preview` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC26 | Xem lịch sử yêu cầu rút tiền | `GET /api/organizer/withdrawals` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC27 | Xem chi tiết yêu cầu rút tiền | `GET /api/organizer/withdrawals/{id}` | Required — access token, role `ORGANIZER` | `200 OK` |
+| UC27 | Hủy yêu cầu rút tiền | `POST /api/organizer/withdrawals/{id}/cancel` | Required — access token, role `ORGANIZER` | `200 OK` |
+| Customer Booking | Danh sách loại vé mở bán | `GET /api/bookings/events/{eventId}/ticket-types` | Required — access token, role `CUSTOMER` | `200 OK` |
+| Customer Booking | Đặt vé và giữ chỗ | `POST /api/bookings` | Required — access token, role `CUSTOMER` | `201 Created` |
+| Customer Booking | Tạo URL thanh toán VNPay | `POST /api/bookings/{bookingId}/payments/vnpay` | Required — access token, role `CUSTOMER` | `200 OK` |
+| Customer Booking | Lịch sử đặt vé | `GET /api/bookings` | Required — access token, role `CUSTOMER` | `200 OK` |
+| Customer Booking | Chi tiết đặt vé | `GET /api/bookings/{bookingId}` | Required — access token, role `CUSTOMER` | `200 OK` |
+| Hỗ trợ Booking | IPN callback từ VNPay | `GET /api/payments/vnpay/ipn` | Public — xác thực chữ ký HMAC | `200 OK` |
+| Hỗ trợ Booking | Trang trả về sau thanh toán | `GET /api/payments/vnpay/return` | Public — xác thực chữ ký HMAC | `200 OK` |
+| Customer Tickets | Danh sách vé điện tử | `GET /api/tickets` | Required — access token, role `CUSTOMER` | `200 OK` |
+| UC28 | Xem danh sách sự kiện được phân công | `GET /api/staff/events` | Required — access token, role `STAFF` | `200 OK` |
+| UC29 | Xem chi tiết sự kiện được phân công | `GET /api/staff/events/{eventId}` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Danh sách khách hàng đã đặt vé | `GET /api/staff/events/{eventId}/customers` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Danh sách loại vé sự kiện | `GET /api/staff/events/{eventId}/ticket-types` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Thống kê vé sự kiện | `GET /api/staff/events/{eventId}/stats` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Danh sách vé và bộ lọc soát vé | `GET /api/staff/events/{eventId}/tickets` | Required — access token, role `STAFF` | `200 OK` |
+| Hỗ trợ UC29 | Soát vé / Check-in QR (Mobile) | `POST /api/staff/events/{eventId}/check-in` | Required — access token, role `STAFF` | `200 OK` |
 
 ## 3. Đăng ký tài khoản
 
@@ -1182,7 +1208,7 @@ Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở m�
 
 ### 11.12. Transaction, version và thông báo xét duyệt
 
-Quyết định, trạng thái vé và bản ghi `notifications` được lưu trong cùng transaction. Lưu thông báo lỗi thì rollback toàn bộ; không có gửi email hoặc tác vụ delivery ngoài DB. Duyệt/từ chối lặp hoặc đồng thời chỉ một quyết định thành công, một thông báo.
+Quyết định, trạng thái vé và bản ghi `notifications` được lưu trong cùng transaction. Lưu thông báo lỗi thì rollback toàn bộ. Sau commit, backend đẩy SSE đến các phiên web của người nhận. Duyệt/từ chối lặp hoặc đồng thời chỉ một quyết định thành công; mỗi người nhận được một thông báo.
 
 Event dùng `@Version`. Organizer sửa/hủy dùng `PESSIMISTIC_FORCE_INCREMENT`, bảo đảm thay đổi chỉ vé/khách mời cũng tăng version. Admin đọc/xử lý khóa cùng bản ghi, kiểm tra `PENDING_APPROVAL` rồi so version. Khi nhận `404`/`409`, frontend chặn quyết định tiếp cho đến khi đọc lại hồ sơ. Form giữ dữ liệu khi lỗi có thể thử lại, chặn gửi lặp; hủy dialog không gọi API.
 
@@ -1191,13 +1217,13 @@ Event dùng `@Version`. Organizer sửa/hủy dùng `PESSIMISTIC_FORCE_INCREMENT
 V4 thêm version mặc định 0, trạng thái REJECTED và unique index tên danh mục. Không chỉnh V1–V3. Nếu dữ liệu đang có tên trùng sau chuẩn hóa, migration dừng; cần xử lý dữ liệu theo quyết định của nhóm, không tự gộp/xóa.
 AdminIntegrationTests kiểm tra security, tạo user/hash, khóa phiên, danh mục, version, tranh chấp quyết định, rollback thông báo và giới hạn dữ liệu người nhận. Test PostgreSQL chạy trong môi trường riêng theo README.
 
-## 12. Organizer đọc thông báo (Hỗ trợ UC35–36)
+## 12. Thông báo trên web (Admin, Organizer, Customer)
 
 | Mục | Nội dung |
 | --- | --- |
 | **Method + Endpoint** | `GET /api/notifications` |
 | **Authentication** | **Required** — cookie `access_token` hợp lệ, tài khoản đang `ACTIVE`. |
-| **Role được phép sử dụng** | `ORGANIZER` |
+| **Role được phép sử dụng** | `ADMIN`, `ORGANIZER`, `CUSTOMER` |
 | **Path Parameters** | Không có. |
 | **Query Parameters** | `page` (integer, tùy chọn, mặc định 0, không âm), `pageSize` (integer, tùy chọn, mặc định 20, từ 1–100). |
 
@@ -1210,14 +1236,6 @@ Không có.
 **Thành công — `200 OK`:**
 
 ```json
-[
-  {
-    "id": 1,
-    "name": "Âm nhạc",
-    "description": "Sự kiện âm nhạc"
-  }
-]
-```
 {
   "items": [
     {
@@ -1236,7 +1254,29 @@ Không có.
 }
 ```
 
-Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông báo của tài khoản đang đăng nhập, sắp xếp ID giảm dần. Type xét duyệt là `EVENT_APPROVED`/`EVENT_REJECTED`. Danh sách rỗng trả `200` với `items: []`. Endpoint chỉ đọc, chưa đánh dấu thông báo đã đọc; không gửi email.
+Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông báo của tài khoản đang đăng nhập, sắp xếp ID giảm dần. Danh sách rỗng trả `200` với `items: []`; `createdAt` là UTC.
+
+### Trạng thái đọc và SSE
+
+| Method + Endpoint | Kết quả |
+| --- | --- |
+| `GET /api/notifications/unread-count` | `200`, JSON number là số chưa đọc của tài khoản hiện tại. |
+| `PATCH /api/notifications/{id}/read` | `204`, đánh dấu đã đọc; gọi lại vẫn thành công. ID không tồn tại hoặc thuộc tài khoản khác trả `404 NOTIFICATION_NOT_FOUND`. |
+| `PATCH /api/notifications/read-all` | `204`, đánh dấu tất cả thông báo hiện tại đã đọc. |
+| `GET /api/notifications/stream` | `200 text/event-stream`, xác thực bằng cookie; chỉ nhận thay đổi của chính tài khoản. |
+
+Mọi PATCH cần `X-CSRF-Protection: 1`. Kết nối SSE khác origin cần `withCredentials: true` và origin được backend cho phép. Stream gửi `connected` khi kết nối, `notifications-changed` sau khi tạo/đánh dấu đọc đã commit và heartbeat mỗi 25 giây. SSE chỉ báo cần tải lại dữ liệu; frontend lấy danh sách/số chưa đọc qua REST. Mỗi kết nối tồn tại tối đa 120 giây, frontend tự kết nối lại với backoff tối đa 30 giây và đồng bộ lại DB. Phiên hết hạn/thu hồi hoặc tài khoản bị khóa sẽ bị đóng stream.
+
+Thông báo phát sinh từ các nghiệp vụ hiện có:
+
+- Admin ACTIVE nhận sự kiện mới, cập nhật chờ duyệt và yêu cầu hủy.
+- Organizer nhận kết quả xét duyệt và booking đã xác nhận.
+- Customer nhận thông báo khi vé được phát hành thành công (vé miễn phí hoặc IPN VNPay hợp lệ).
+- Customer có booking PAID nhận cập nhật, yêu cầu hủy và kết quả xét duyệt của sự kiện liên quan. Yêu cầu hủy được mô tả là đang chờ xét duyệt, chưa phải sự kiện đã hủy.
+
+STAFF tạm thời không nhận thông báo mới và không được truy cập các REST API/SSE thông báo (`403 FORBIDDEN`).
+
+DB là nguồn dữ liệu chính: đóng web/mất mạng vẫn lưu thông báo, mở lại sẽ tải qua REST. SSE dùng bộ nhớ của một instance backend; triển khai nhiều instance cần bổ sung cơ chế chia sẻ sự kiện. Không thêm email, FCM hoặc Kafka.
 
 ### Mã lỗi
 
@@ -1244,10 +1284,6 @@ Người nhận lấy từ principal, không nhận `userId`; chỉ trả thông
 | --- | --- | --- |
 | `400` | `INVALID_PAGE` / `INVALID_REQUEST` | Phân trang không hợp lệ. |
 | `401` | `UNAUTHORIZED` | Thiếu/sai phiên, phiên hết hạn/thu hồi hoặc tài khoản bị khóa. |
-| `403` | `FORBIDDEN` | Sai role. |
+| `403` | `FORBIDDEN` | Sai role hoặc PATCH thiếu CSRF header. |
 
 Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
-
-## API tài chính Admin UC37–UC42
-
-Hợp đồng mới được mô tả riêng tại [admin-finance-api.md](admin-finance-api.md), gồm thống kê, list/detail/approve/reject yêu cầu rút tiền và đọc đối soát sự kiện CANCELED. Các endpoint UC31–UC36 giữ nguyên. Chưa có API gửi hoàn tiền hoặc webhook vì thiếu hợp đồng tích hợp.

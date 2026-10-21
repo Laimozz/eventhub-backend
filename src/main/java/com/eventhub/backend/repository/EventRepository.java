@@ -40,6 +40,8 @@ public interface EventRepository extends JpaRepository<Event, Integer> {
     @EntityGraph(attributePaths = {"venue", "category", "organizer"})
     Optional<Event> findByIdAndOrganizerId(Integer id, Integer organizerId);
 
+    List<Event> findByOrganizerIdOrderByIdAsc(Integer organizerId);
+
     // Bump the revision even when only guests/tickets change, not scalar event fields.
     @Lock(LockModeType.PESSIMISTIC_FORCE_INCREMENT)
     @Query("select e from Event e where e.id = :eventId and e.organizer.id = :organizerId")

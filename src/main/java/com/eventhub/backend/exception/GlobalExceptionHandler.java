@@ -33,6 +33,26 @@ public class GlobalExceptionHandler implements AuthenticationEntryPoint, AccessD
         return error(exception.getStatus(), exception.getCode(), exception.getMessage(), request);
     }
 
+    @ExceptionHandler(EventStaffException.class)
+    ResponseEntity<ApiError> handleEventStaff(EventStaffException exception, HttpServletRequest request) {
+        return error(exception.getStatus(), exception.getCode(), exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(EventStatisticException.class)
+    ResponseEntity<ApiError> handleEventStatistic(EventStatisticException exception, HttpServletRequest request) {
+        return error(exception.getStatus(), exception.getCode(), exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(OrganizerWalletException.class)
+    ResponseEntity<ApiError> handleOrganizerWallet(OrganizerWalletException exception, HttpServletRequest request) {
+        return error(exception.getStatus(), exception.getCode(), exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(WithdrawalRequestException.class)
+    ResponseEntity<ApiError> handleWithdrawalRequest(WithdrawalRequestException exception, HttpServletRequest request) {
+        return error(exception.getStatus(), exception.getCode(), exception.getMessage(), request);
+    }
+
     @ExceptionHandler(org.springframework.orm.ObjectOptimisticLockingFailureException.class)
     ResponseEntity<ApiError> handleVersionConflict(HttpServletRequest request) {
         return error(HttpStatus.CONFLICT, "EVENT_VERSION_CONFLICT", "Nội dung đã thay đổi. Vui lòng tải lại.", request);
@@ -62,8 +82,8 @@ public class GlobalExceptionHandler implements AuthenticationEntryPoint, AccessD
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException exception, HttpServletRequest request) {
         Map<String, String> errors = new LinkedHashMap<>();
-        exception.getBindingResult().getFieldErrors().forEach(field ->
-                errors.putIfAbsent(field.getField(), field.getDefaultMessage()));
+        exception.getBindingResult().getFieldErrors()
+                .forEach(field -> errors.putIfAbsent(field.getField(), field.getDefaultMessage()));
         return ResponseEntity.badRequest().body(new ApiError(Instant.now(), 400, "VALIDATION_ERROR",
                 "Request validation failed", request.getRequestURI(), errors));
     }
@@ -74,23 +94,26 @@ public class GlobalExceptionHandler implements AuthenticationEntryPoint, AccessD
     }
 
     @ExceptionHandler(EmailAlreadyExistsException.class)
-    ResponseEntity<ApiError> handleEmailAlreadyExists(EmailAlreadyExistsException exception, HttpServletRequest request) {
+    ResponseEntity<ApiError> handleEmailAlreadyExists(EmailAlreadyExistsException exception,
+            HttpServletRequest request) {
         return error(HttpStatus.CONFLICT, "EMAIL_ALREADY_EXISTS", exception.getMessage(), request);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     ResponseEntity<ApiError> handleConflict(DataIntegrityViolationException exception, HttpServletRequest request) {
-        if (request.getRequestURI().startsWith("/api/admin/")) {
-            for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
-                if (cause instanceof org.hibernate.exception.ConstraintViolationException constraint) {
-                    String name = constraint.getConstraintName();
-                    if ("uk_categories_name_normalized".equals(name))
-                        return error(HttpStatus.CONFLICT, "CATEGORY_NAME_ALREADY_EXISTS", "Tên danh mục đã tồn tại", request);
-                    if ("uk_users_email_normalized".equals(name) || "uk_users_email".equals(name))
-                        return error(HttpStatus.CONFLICT, "EMAIL_ALREADY_EXISTS", "Email đã được sử dụng", request);
-                    if ("events_categories_id_fkey".equals(name))
-                        return error(HttpStatus.CONFLICT, "CATEGORY_IN_USE", "Danh mục đang được sử dụng", request);
-                }
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof org.hibernate.exception.ConstraintViolationException constraint) {
+                String name = constraint.getConstraintName();
+                if ("uk_event_staffs_events_id_staff_id".equals(name))
+                    return error(HttpStatus.CONFLICT, "STAFF_ALREADY_ASSIGNED",
+                            "Staff này đã được phân công cho sự kiện", request);
+                if ("uk_categories_name_normalized".equals(name))
+                    return error(HttpStatus.CONFLICT, "CATEGORY_NAME_ALREADY_EXISTS", "Tên danh mục đã tồn tại",
+                            request);
+                if ("uk_users_email_normalized".equals(name) || "uk_users_email".equals(name))
+                    return error(HttpStatus.CONFLICT, "EMAIL_ALREADY_EXISTS", "Email đã được sử dụng", request);
+                if ("events_categories_id_fkey".equals(name))
+                    return error(HttpStatus.CONFLICT, "CATEGORY_IN_USE", "Danh mục đang được sử dụng", request);
             }
         }
         return error(HttpStatus.CONFLICT, "DATA_CONFLICT", "Data conflicts with an existing record", request);
@@ -98,7 +121,8 @@ public class GlobalExceptionHandler implements AuthenticationEntryPoint, AccessD
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     ResponseEntity<ApiError> handleOversizedImage(HttpServletRequest request) {
-        return error(HttpStatus.PAYLOAD_TOO_LARGE, "IMAGE_TOO_LARGE", "Images must not exceed 5 MB each or 50 MB per request", request);
+        return error(HttpStatus.PAYLOAD_TOO_LARGE, "IMAGE_TOO_LARGE",
+                "Images must not exceed 5 MB each or 50 MB per request", request);
     }
 
     private ResponseEntity<ApiError> error(HttpStatus status, String code, String message,
@@ -122,7 +146,8 @@ public class GlobalExceptionHandler implements AuthenticationEntryPoint, AccessD
             String code, String message) throws IOException {
         response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        objectMapper.writeValue(response.getOutputStream(), ApiError.of(status, code, message, request.getRequestURI()));
+        objectMapper.writeValue(response.getOutputStream(),
+                ApiError.of(status, code, message, request.getRequestURI()));
     }
 
     public record ApiError(Instant timestamp, int status, String code, String message,
