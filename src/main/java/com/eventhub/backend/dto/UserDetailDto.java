@@ -26,12 +26,30 @@ public record UserDetailDto(
         @Past(message = "Ngày sinh phải trước ngày hiện tại")
         LocalDate dateOfBirth,
         String gender,
-        String avatarUrl
+        String avatarUrl,
+        String city,
+        String preferredCategories
 ) {
     public UserDetailDto {
         email = email == null ? null : email.strip().toLowerCase();
         fullName = fullName == null ? null : fullName.strip();
         phone = phone == null ? null : phone.strip().replaceAll("[\\s.-]+", "");
+        city = city == null ? null : city.strip();
+        preferredCategories = preferredCategories == null ? null : preferredCategories.strip();
+    }
+
+    public UserDetailDto(
+            Integer id,
+            String fullName,
+            String email,
+            String phone,
+            Role role,
+            String status,
+            LocalDate dateOfBirth,
+            String gender,
+            String avatarUrl
+    ) {
+        this(id, fullName, email, phone, role, status, dateOfBirth, gender, avatarUrl, null, null);
     }
 
     public static UserDetailDto from(User user) {
@@ -44,7 +62,9 @@ public record UserDetailDto(
                 user.getStatus(),
                 user.getDateOfBirth(),
                 user.getGender(),
-                user.getAvatarUrl()
+                user.getAvatarUrl(),
+                user.getCity(),
+                user.getPreferredCategories()
         );
     }
 }

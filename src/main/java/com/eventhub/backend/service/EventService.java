@@ -54,6 +54,7 @@ public class EventService {
     private final Clock clock;
     private final EventImageService images;
     private final BookingItemRepository bookingItems;
+    private final AiOutboxService aiOutbox;
 
     @Transactional(readOnly = true)
     public EventListResponse listEvents(Integer organizerId, int page, int size, String search, EventStatus status) {
@@ -111,6 +112,7 @@ public class EventService {
         notifications.notifyEventParticipants(eventId, "Sự kiện có yêu cầu hủy",
                 "Sự kiện #" + eventId + " đang chờ xét duyệt yêu cầu hủy. Lý do: " + event.getCancelReason(),
                 "EVENT_PENDING_CANCELLATION");
+        aiOutbox.logEventOutbox(eventId, "UPDATE");
         events.flush();
         return EventResponse.from(event, savedTickets, guests.findByEventIdOrderByIdAsc(eventId), LocalDateTime.now(clock));
     }
@@ -224,8 +226,11 @@ public class EventService {
         guests.saveAll(savedGuests);
         notifyAdmin(event, "Có sự kiện cập nhật chờ duyệt", "EVENT_PENDING_APPROVAL",
                 "\" vừa được cập nhật và gửi lên chờ duyệt.");
+        notifications.create(event.getOrganizer(), "Cập nhật sự kiện thành công",
+                "Sự kiện #" + eventId + " đã được cập nhật thành công và đang chờ xét duyệt lại.", "EVENT_UPDATED");
         notifications.notifyEventParticipants(eventId, "Thông tin sự kiện được cập nhật",
                 "Sự kiện #" + eventId + " vừa được cập nhật và đang chờ xét duyệt lại.", "EVENT_UPDATED");
+        aiOutbox.logEventOutbox(eventId, "UPDATE");
         events.flush();
         var urls = uploadImages(prepared);
         if (urls.containsKey("bannerImage")) event.setBannerImageUrl(urls.get("bannerImage"));
@@ -303,6 +308,9 @@ public class EventService {
                     return guest;
                 }).toList());
         notifyAdmin(event);
+        notifications.create(organizer, "Tạo sự kiện thành công",
+                "Sự kiện \"" + event.getName() + "\" đã được tạo thành công và đang chờ xét duyệt.", "EVENT_CREATED");
+        aiOutbox.logEventOutbox(event.getId(), "INSERT");
         // Fail on DB constraints before starting any external uploads.
         events.flush();
         Map<String, String> urls = uploadImages(prepared);

@@ -43,6 +43,9 @@ public class UserEventInteraction {
     @Column(name = "interaction_type", nullable = true)
     private String interactionType;
 
+    @Column(name = "dwell_seconds")
+    private Integer dwellSeconds = 0;
+
     @PrePersist
     private void initializeCreatedAt() {
         createdAt = LocalDateTime.now(ZoneOffset.UTC);

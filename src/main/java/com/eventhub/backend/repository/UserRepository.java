@@ -36,15 +36,28 @@ public interface UserRepository extends JpaRepository<User, Integer> {
     boolean existsByEmailAndIdNotNative(@Param("email") String email, @Param("id") Integer id);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = "UPDATE users SET full_name = :fullName, phone = :phone, email = :email, date_of_birth = :dateOfBirth, gender = :gender, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'UTC' WHERE id = :id", nativeQuery = true)
+    @Query(value = "UPDATE users SET full_name = :fullName, phone = :phone, email = :email, date_of_birth = :dateOfBirth, gender = :gender, city = :city, preferred_categories = :preferredCategories, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'UTC' WHERE id = :id", nativeQuery = true)
     int updateUserDetailNative(
             @Param("id") Integer id,
             @Param("fullName") String fullName,
             @Param("phone") String phone,
             @Param("email") String email,
             @Param("dateOfBirth") java.time.LocalDate dateOfBirth,
-            @Param("gender") String gender
+            @Param("gender") String gender,
+            @Param("city") String city,
+            @Param("preferredCategories") String preferredCategories
     );
+
+    default int updateUserDetailNative(
+            Integer id,
+            String fullName,
+            String phone,
+            String email,
+            java.time.LocalDate dateOfBirth,
+            String gender
+    ) {
+        return updateUserDetailNative(id, fullName, phone, email, dateOfBirth, gender, null, null);
+    }
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = "UPDATE users SET password = :password, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'UTC' WHERE id = :id", nativeQuery = true)

@@ -32,9 +32,10 @@ public class AuthService {
     private final ApplicationProperties properties;
     private final Clock clock;
     private final String dummyPasswordHash;
+    private final AiOutboxService aiOutbox;
 
     public AuthService(UserRepository users, RefreshTokenRepository tokens, PasswordEncoder passwords,
-            JwtService jwt, ApplicationProperties properties, Clock clock) {
+            JwtService jwt, ApplicationProperties properties, Clock clock, AiOutboxService aiOutbox) {
         this.users = users;
         this.tokens = tokens;
         this.passwords = passwords;
@@ -42,6 +43,7 @@ public class AuthService {
         this.properties = properties;
         this.clock = clock;
         this.dummyPasswordHash = passwords.encode(UUID.randomUUID().toString());
+        this.aiOutbox = aiOutbox;
     }
 
     public void register(RegisterRequest request) {
@@ -56,6 +58,9 @@ public class AuthService {
         user.setRole(Role.valueOf(request.role()));
         user.setStatus("ACTIVE");
         users.saveAndFlush(user);
+
+        // Ghi vào outbox để AI Service khởi tạo Vector Mỏ Neo (Profile Anchor) cho user mới
+        aiOutbox.logUserOutbox(user.getId(), "CREATE_USER");
     }
 
     public AuthSession login(LoginRequest request) {

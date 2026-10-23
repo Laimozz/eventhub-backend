@@ -68,6 +68,12 @@ public class User {
     @Column(name = "avatar_url", length = 500)
     private String avatarUrl;
 
+    @Column(name = "city", length = 100)
+    private String city;
+
+    @Column(name = "preferred_categories", length = 255)
+    private String preferredCategories;
+
     public boolean isActive() {
         return "ACTIVE".equals(status);
     }

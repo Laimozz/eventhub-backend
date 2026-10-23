@@ -23,6 +23,7 @@ public class AdminEventReviewService {
     private final UserRepository users;
     private final NotificationService notifications;
     private final Clock clock;
+    private final AiOutboxService aiOutbox;
 
     @Transactional(readOnly = true)
     public PageResponse<PendingEventResponse> list(int page, int pageSize) {
@@ -55,6 +56,7 @@ public class AdminEventReviewService {
         String type = approved ? "EVENT_APPROVED" : "EVENT_REJECTED";
         notifications.create(event.getOrganizer(), title, content, type);
         notifications.notifyEventParticipants(id, title, content, type);
+        aiOutbox.logEventOutbox(id, approved ? "APPROVED" : "REJECTED");
         return new ReviewResponse(id, event.getStatus(), adminId, event.getReviewedAt(), reason, event.getVersion());
     }
 
