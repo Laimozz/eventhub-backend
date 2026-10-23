@@ -416,7 +416,7 @@ Các endpoint dưới đây chỉ dành cho ORGANIZER ACTIVE, lấy tài khoản
 | `GET /api/events/mine` | Danh sách riêng của Organizer, tìm theo tên và lọc trạng thái, mới tạo trước. |
 | `GET /api/events/{eventId}` | Trả `EventResponse`, gồm địa điểm, danh mục, loại vé, khách mời và ảnh đã lưu. |
 | `PUT /api/events/{eventId}` | Cập nhật toàn bộ hồ sơ bằng multipart, gửi Admin duyệt lại. |
-| `POST /api/events/{eventId}/cancel` | Gửi yêu cầu hủy cho Admin bằng JSON `{ "reason": "Lý do hủy" }`. |
+| `POST /api/events/{eventId}/cancel` | Hủy trước giờ bắt đầu bằng JSON `{ "reason": "Lý do hủy" }`. |
 
 ### Danh sách và chi tiết
 
@@ -433,26 +433,12 @@ Query danh sách: `page` bắt đầu từ 0 (mặc định 0), `size` từ 1–
 - Khóa sự kiện và các loại vé khi sửa/hủy. Validation dữ liệu/ảnh hoàn tất trước upload. Upload hoặc lưu DB thất bại thì rollback toàn bộ hồ sơ và dọn ảnh mới đã thử upload như luồng tạo; không gửi file mới thì không cần gọi Cloudinary. Địa điểm dùng chung không bị sửa theo sự kiện này.
 - Thành công trả `200` và hồ sơ đã lưu. `400` khi dữ liệu, ID con hoặc file không hợp lệ; `409` khi trạng thái không cho sửa, số lượng vé hoặc liên kết booking không cho phép thay đổi. Các lỗi ảnh giữ HTTP status như mục 9.
 
-### Gửi yêu cầu hủy (UC23)
+### Hủy sự kiện (UC23)
 
-`reason` bắt buộc, không chỉ chứa khoảng trắng, tối đa 255 ký tự. Cho phép yêu cầu hủy sự kiện `PENDING_APPROVAL`, `APPROVED` hoặc `ONGOING` khi chưa qua `endTime`. Backend lưu lý do, chuyển sang `PENDING_CANCELLATION`, tạm ngừng bán các loại vé (`INACTIVE`), tạo thông báo `EVENT_PENDING_CANCELLATION` cho Admin ACTIVE. `canceledAt` giữ null vì Admin chưa duyệt hủy. Thành công trả `200` với `EventResponse`; yêu cầu lặp hoặc trạng thái kết thúc/đã hủy/chờ hủy trả `409`. FE không thể sửa hoặc tiếp tục gửi yêu cầu hủy khi đang chờ Admin.
+POST `/api/events/{eventId}/cancel`, JSON `{"reason":"Lý do hủy"}`. Lý do bắt buộc, trim, tối đa 255 ký tự. Chủ Organizer chỉ hủy PENDING_APPROVAL/APPROVED/REJECTED trước startTime; đúng/sau giờ bắt đầu bị chặn. Transaction khóa sự kiện và kho vé, lưu CANCELED/canceledAt, vô hiệu vé VALID, ngừng bán và giải phóng booking đang giữ. Tạo thông báo cho Admin, Organizer và khách đã thanh toán; tạo hồ sơ WAITING cho payment SUCCESS có số tiền dương. Endpoint không gọi VNPAY; Admin kích hoạt hoàn hàng loạt/cá nhân theo [API tài chính](admin-finance-api.md).
 
-Không xóa sự kiện, booking hoặc vé; không đánh dấu `CANCELED`, hoàn tiền hay triển khai thao tác duyệt của Admin trong endpoint này.
+Gửi lại hoặc trạng thái không hợp lệ trả 409. Không xóa lịch sử booking/payment; hồ sơ PENDING_CANCELLATION cũ giữ nguyên để đối soát riêng.
 
-## 11. Xem danh sách sự kiện
-
-| Mục | Nội dung |
-| --- | --- |
-| **Use Case liên quan** | UC06 (Xem danh sách sự kiện) |
-| **Tên API** | Xem danh sách sự kiện |
-| **Method + Endpoint** | `GET /api/public/events` |
-| **Authentication** | **Public** |
-| **Role được phép sử dụng** | Guest, Customer, Staff, Organizer, Admin |
-| **Path Parameters** | Không có |
-| **Query Parameters** | `page` (integer, mặc định 0): Trang hiện tại.<br>`size` (integer, mặc định 9): Số phần tử trên mỗi trang. |
-| **Request Body** | Không có |
-
-### Response mẫu
 <a id="admin-api"></a>
 
 ## 11. API quản trị UC31–36
@@ -518,19 +504,6 @@ Không có.
 
 ```json
 {
-  "content": [
-    {
-      "id": 1,
-      "name": "Anh trai say hi",
-      "thumbnailImageUrl": "https://picsum.photos/400/300",
-      "startTime": "2026-09-24T06:00:00",
-      "endTime": "2026-09-24T10:00:00",
-      "city": "Hà Nội",
-      "startingPrice": 300000.00
-    }
-  ],
-  "page": 0,
-  "size": 9,
   "items": [
     {
       "id": 12,
@@ -548,53 +521,6 @@ Không có.
 }
 ```
 
-**Trạng thái/Error chính:**
-- `200 OK`: Danh sách trả về chỉ bao gồm các sự kiện có trạng thái `APPROVED` hoặc `ONGOING`. Nếu không có, mảng `content` rỗng.
-
-## 12. Tìm kiếm sự kiện
-
-| Mục | Nội dung |
-| --- | --- |
-| **Use Case liên quan** | UC07 (Tìm kiếm sự kiện) |
-| **Tên API** | Tìm kiếm sự kiện |
-| **Method + Endpoint** | `GET /api/public/events` |
-| **Authentication** | **Public** |
-| **Role được phép sử dụng** | Guest, Customer, Staff, Organizer, Admin |
-| **Path Parameters** | Không có |
-| **Query Parameters** | `search` (string, bắt buộc): Từ khóa tìm kiếm theo tên sự kiện.<br>`page` (integer, mặc định 0): Trang hiện tại.<br>`size` (integer, mặc định 9): Số phần tử trên mỗi trang. |
-| **Request Body** | Không có |
-
-*(Response tương tự như mục 11)*
-
-## 13. Lọc sự kiện
-
-| Mục | Nội dung |
-| --- | --- |
-| **Use Case liên quan** | UC08 (Lọc sự kiện) |
-| **Tên API** | Lọc sự kiện |
-| **Method + Endpoint** | `GET /api/public/events` |
-| **Authentication** | **Public** |
-| **Role được phép sử dụng** | Guest, Customer, Staff, Organizer, Admin |
-| **Path Parameters** | Không có |
-| **Query Parameters** | `fromDate` (datetime ISO, tùy chọn): Thời gian bắt đầu.<br>`toDate` (datetime ISO, tùy chọn): Thời gian kết thúc.<br>`categoryId` (integer, tùy chọn): ID của danh mục.<br>`city` (string, tùy chọn): Tên thành phố.<br>`page` (integer, mặc định 0): Trang hiện tại.<br>`size` (integer, mặc định 9): Số phần tử trên trang. |
-| **Request Body** | Không có |
-
-*(Response tương tự như mục 11)*
-
-## 14. Xem chi tiết sự kiện
-
-| Mục | Nội dung |
-| --- | --- |
-| **Use Case liên quan** | UC09 |
-| **Tên API** | Xem chi tiết sự kiện |
-| **Method + Endpoint** | `GET /api/public/events/{eventId}` |
-| **Authentication** | **Public** |
-| **Role được phép sử dụng** | Guest, Customer, Staff, Organizer, Admin |
-| **Path Parameters** | `eventId` (integer): ID của sự kiện. |
-| **Query Parameters** | Không có |
-| **Request Body** | Không có |
-
-### Response mẫu
 Không có kết quả trả `200` với `items: []`. Kết quả sắp xếp ID giảm dần.
 
 #### Mã lỗi
@@ -740,50 +666,6 @@ Không có.
 
 ```json
 {
-  "id": 1,
-  "name": "Anh trai say hi",
-  "description": "Show âm nhạc bùng nổ",
-  "thumbnailImageUrl": "https://picsum.photos/400/300",
-  "bannerImageUrl": "https://picsum.photos/1200/400",
-  "imageZoneUrl": "https://picsum.photos/800/600",
-  "startTime": "2026-09-24T06:00:00",
-  "endTime": "2026-09-24T10:00:00",
-  "organizerName": "VieON Channel",
-  "categoryName": "Âm nhạc",
-  "venue": {
-    "city": "Hà Nội",
-    "address": "Sân Vận Động Quốc Gia Mỹ Đình"
-  },
-  "startingPrice": 300000.00,
-  "suggestedEvents": [
-    {
-      "id": 2,
-      "name": "LOALOA SHOW",
-      "thumbnailImageUrl": "https://picsum.photos/400/300",
-      "startTime": "2026-09-26T08:00:00",
-      "endTime": "2026-09-26T12:00:00",
-      "city": "Hà Nội",
-      "startingPrice": 300000.00
-    }
-  ]
-}
-```
-
-**Trạng thái/Error chính:**
-- `404 Not Found`: Sự kiện không tồn tại hoặc chưa được duyệt (`PENDING_APPROVAL`, `CANCELED`,...).
-
-## 15. Lấy danh sách danh mục (Cập nhật cho Public)
-
-| Mục | Nội dung |
-| --- | --- |
-| **Use Case liên quan** | Hỗ trợ UC08 (Lọc sự kiện), UC19 (Tạo sự kiện) |
-| **Tên API** | Lấy danh sách danh mục |
-| **Method + Endpoint** | `GET /api/categories` |
-| **Authentication** | **Public** |
-| **Role được phép sử dụng** | Guest, Customer, Staff, Organizer, Admin |
-| **Path Parameters** | Không có |
-| **Query Parameters** | Không có |
-| **Request Body** | Không có |
   "items": [
     {
       "id": 3,
@@ -798,7 +680,7 @@ Không có.
 }
 ```
 
-Danh sách rỗng trả `200` với `items: []`. API Organizer `GET /api/categories` tiếp tục đọc cùng bảng; endpoint admin trả phân trang và sắp xếp ID giảm dần.
+Danh sách rỗng trả `200` với `items: []`. API public `GET /api/categories` tiếp tục đọc cùng bảng; endpoint admin trả phân trang và sắp xếp ID giảm dần.
 
 #### Mã lỗi
 
@@ -1288,6 +1170,18 @@ DB là nguồn dữ liệu chính: đóng web/mất mạng vẫn lưu thông bá
 
 Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở mục 11.
 
+## 13. Danh sách, tìm kiếm và lọc sự kiện public (UC06–08)
+
+GET `/api/public/events` không cần đăng nhập. Query: page=0, size=9, search chuỗi tìm tên, categoryId, city, fromDate/toDate (datetime ISO); các bộ lọc tùy chọn. Chỉ trả sự kiện công khai APPROVED/ONGOING. Response `content`, `page`, `size`, `totalElements`, `totalPages`; mỗi phần tử gồm id, name, thumbnailImageUrl, startTime, endTime, city, startingPrice. Không có kết quả trả content rỗng.
+
+## 14. Chi tiết sự kiện public (UC09)
+
+GET `/api/public/events/{eventId}` không cần đăng nhập; sự kiện không tồn tại/không công khai trả 404. Response gồm id, name, description, thumbnailImageUrl, bannerImageUrl, imageZoneUrl, startTime, endTime, organizerName, categoryName, venue (city, address), startingPrice, suggestedEvents (cùng cấu trúc thẻ danh sách).
+
+## 15. Danh mục public
+
+GET `/api/categories` không cần đăng nhập, không có body/query; trả danh sách danh mục dùng chung cho bộ lọc public và form Organizer. API Admin CRUD danh mục ở mục 11.4–11.7.
+
 ## 16. Quản lý Staff của sự kiện (UC13)
 
 Các endpoint dưới đây chỉ dành cho `ORGANIZER` đang `ACTIVE`, thao tác trên sự kiện do chính mình tổ chức và sự kiện đã được Admin duyệt (`APPROVED`, `ONGOING`, `COMPLETED`).
@@ -1470,7 +1364,7 @@ Endpoint dành cho `ORGANIZER` xem thông tin số dư ví (chờ xác nhận, k
 ```
 
 ### 18.2. Trường hợp chưa từng bán vé sự kiện nào (Quy tắc 2.1)
-- Hiển thị toàn bộ số dư bằng `0` và danh sách doanh thu trống:
+- Khi chưa có ví và chưa có doanh thu, trả số dư `0` và danh sách doanh thu trống. Nếu ví đã có dữ liệu, luôn trả số dư đã lưu dù hiện không có vé bán; GET không tạo ví:
 ```json
 {
   "pendingBalance": 0.00,
@@ -1492,9 +1386,9 @@ Endpoint dành cho `ORGANIZER` xem thông tin số dư ví (chờ xác nhận, k
 | `403` | `FORBIDDEN` | Tài khoản không có role `ORGANIZER` hoặc không ở trạng thái `ACTIVE`. |
 
 ## 19. UC25 — Tạo Yêu Cầu Rút Tiền
- 
+
 Bộ endpoint dành cho `ORGANIZER` thực hiện quy trình rút tiền từ số dư khả dụng sang số dư đang chờ rút.
- 
+
 ### 19.1. Tạo yêu cầu rút tiền (Bước 5–6)
 - **Endpoint**: `POST /api/organizer/withdrawals`
 - **Method**: `POST`
@@ -1508,13 +1402,13 @@ Bộ endpoint dành cho `ORGANIZER` thực hiện quy trình rút tiền từ s�
   "accountNumber": "0123456789"
 }
 ```
- 
+
 | Trường | Kiểu | Bắt buộc | Ràng buộc |
 | --- | --- | --- | --- |
 | `amount` | `BigDecimal` | Có | > 0, ≤ số dư khả dụng |
 | `bankName` | `String` | Có | Không rỗng, tối đa 255 ký tự |
 | `accountNumber` | `String` | Có | Không rỗng, tối đa 50 ký tự |
- 
+
 - **Response thành công**: `201 Created`
 ```json
 {
@@ -1533,7 +1427,7 @@ Bộ endpoint dành cho `ORGANIZER` thực hiện quy trình rút tiền từ s�
   "transactionCode": null
 }
 ```
- 
+
 ### 19.2. Xác nhận / Xem trước thông tin rút tiền (Bước 4)
 Endpoint hỗ trợ màn hình xác nhận thông tin trước khi gửi yêu cầu (hiển thị số tiền, ngân hàng, số dư khả dụng còn lại sau khi trừ).
 - **Endpoint**: `POST /api/organizer/withdrawals/preview`
@@ -1554,7 +1448,7 @@ Endpoint hỗ trợ màn hình xác nhận thông tin trước khi gửi yêu c�
   "formattedAvailableBalanceAfter": "32.300.000đ"
 }
 ```
- 
+
 ### 19.3. Danh sách lịch sử yêu cầu rút tiền
 - **Endpoint**: `GET /api/organizer/withdrawals`
 - **Method**: `GET`
@@ -1579,13 +1473,13 @@ Endpoint hỗ trợ màn hình xác nhận thông tin trước khi gửi yêu c�
   }
 ]
 ```
- 
+
 ### 19.4. Nghiệp vụ xử lý
 1. **Pre-condition**: Nhà tổ chức đã đăng nhập và tài khoản ở trạng thái `ACTIVE` với role `ORGANIZER`. Số dư khả dụng > 0.
 2. **Nhập thông tin (Bước 2–3)**: Nhà tổ chức nhập số tiền muốn rút, tên ngân hàng, số tài khoản.
 3. **Xác nhận (Bước 4)**: Hệ thống hiển thị lại số tiền, ngân hàng, số tài khoản và số dư khả dụng còn lại sau khi trừ (`availableBalanceAfter`). Nếu nhà tổ chức chọn "Hủy" (Exception 5.1), không tạo bản ghi nào và quay lại form nhập.
 4. **Xác nhận gửi (Bước 5–6)**: Hệ thống kiểm tra số dư khả dụng một lần nữa, trừ `amount` khỏi `availableBalance`, cộng vào `withdrawalPendingBalance`, lưu bản ghi `WithdrawalRequest` với trạng thái `PENDING` ("Chờ duyệt") để gửi cho Admin xử lý.
- 
+
 ### 19.5. Các mã lỗi
 | Status | Code | Mô tả |
 | --- | --- | --- |
@@ -1791,7 +1685,7 @@ Ví dụ response `201` rút gọn:
 }
 ```
 
-`event` đầy đủ còn có `thumbnailImageUrl`, `status`, `startTime`, `endTime`. Booking giữ vé mặc định 15 phút, rút ngắn nếu sắp đóng bán hoặc sự kiện bắt đầu. Vé giữ được trừ khỏi `remainingQuantity` và cộng vào `reservedQuantity`; thanh toán thành công chỉ giảm reserved, hết hạn trả reserved về remaining. Booking miễn phí chuyển PAID và phát vé ngay, payment có `paymentMethod: "FREE"`.
+`event` đầy đủ còn có `thumbnailImageUrl`, `status`, `startTime`, `endTime`. Booking giữ vé mặc định 5 phút, rút ngắn nếu sắp đóng bán hoặc sự kiện bắt đầu. Vé giữ được trừ khỏi `remainingQuantity` và cộng vào `reservedQuantity`; thanh toán thành công chỉ giảm reserved, hết hạn trả reserved về remaining. Booking miễn phí chuyển PAID và phát vé ngay, payment có `paymentMethod: "FREE"`.
 
 ### Thanh toán
 
@@ -1947,3 +1841,8 @@ Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) phục vụ 
 | **Response** | `200 OK` — `{ "success": true, "message": "Check-in thành công", "ticketId": 123, "checkedInAt": "..." }` |
 | **Lỗi** | `400` Vé không hợp lệ / sai sự kiện; `409` Vé đã được check-in trước đó. |
 | **Lưu ý** | Giao diện Web hiển thị chế độ giám sát và tra cứu (chỉ đọc); chức năng quét mã check-in thực tế được vận hành qua ứng dụng di động (Mobile App). |
+
+
+## 24. Tích hợp tài chính UC37–42
+
+Hợp đồng hiện hành: [admin-finance-api.md](admin-finance-api.md). Doanh thu Organizer dùng snapshot payment_finances sau phí 5%, không nhân giá vé hiện tại. PAID cộng pending; worker chỉ giải ngân sau khi sự kiện kết thúc và đủ điều kiện. Hoàn thành refund đảo snapshot; PAYMENT_REVIEW không ghi có ví. Các mô tả ví ở mục 18 phải được hiểu theo quy tắc nguồn tiền này. Giữ vé mặc định 5 phút, grace IPN 120 giây; PAY/IPN vẫn là nguồn xác nhận thanh toán, return URL không cấp vé.

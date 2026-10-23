@@ -54,6 +54,8 @@ public class EventService {
     private final Clock clock;
     private final EventImageService images;
     private final BookingItemRepository bookingItems;
+    private final BookingService bookings;
+    private final com.eventhub.backend.repository.RefundWorkflowRepository refundWorkflow;
     private final AiOutboxService aiOutbox;
 
     @Transactional(readOnly = true)
@@ -105,14 +107,14 @@ public class EventService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Event cannot be canceled in its current state");
         }
         event.setCancelReason(reason.strip());
-        event.setStatus(EventStatus.PENDING_CANCELLATION);
+        event.setStatus(EventStatus.CANCELED);
+        event.setCanceledAt(LocalDateTime.now(clock));
         var savedTickets = ticketTypes.findForUpdate(eventId);
         savedTickets.forEach(ticket -> ticket.setStatus("INACTIVE"));
         notifyAdmin(event, "Có yêu cầu hủy sự kiện", "EVENT_PENDING_CANCELLATION", "\" vừa được gửi yêu cầu hủy.");
         notifications.notifyEventParticipants(eventId, "Sự kiện có yêu cầu hủy",
                 "Sự kiện #" + eventId + " đang chờ xét duyệt yêu cầu hủy. Lý do: " + event.getCancelReason(),
                 "EVENT_PENDING_CANCELLATION");
-        aiOutbox.logEventOutbox(eventId, "UPDATE");
         events.flush();
         return EventResponse.from(event, savedTickets, guests.findByEventIdOrderByIdAsc(eventId), LocalDateTime.now(clock));
     }

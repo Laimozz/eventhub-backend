@@ -4,16 +4,20 @@ Backend của dự án EventHub, sử dụng Java 21, Spring Boot và Maven. REA
 
 ## 1. Công nghệ và trạng thái hiện tại
 
-| Thành phần | Cấu hình hiện tại |
-| --- | --- |
-| Java | 21 |
-| Spring Boot | 4.1.1, khai báo trong `pom.xml` |
-| Web | Spring Web MVC, cung cấp REST API |
-| Build | Maven, có Maven Wrapper trong repository |
-| Kiểm thử | Spring Boot Test và JUnit |
-| Database | PostgreSQL 16+, Spring Data JPA, Flyway |
+| Thành phần  | Cấu hình hiện tại                        |
+| ----------- | ---------------------------------------- |
+| Java        | 21                                       |
+| Spring Boot | 4.1.1, khai báo trong `pom.xml`          |
+| Web         | Spring Web MVC, cung cấp REST API        |
+| Build       | Maven, có Maven Wrapper trong repository |
+| Kiểm thử    | Spring Boot Test và JUnit                |
+| Database    | PostgreSQL 16+, Spring Data JPA, Flyway  |
 
 Hiện tại dự án có entity/repository, migration Flyway và kiểm thử tích hợp PostgreSQL. API gồm xác thực bằng JWT qua HttpOnly Cookie; Organizer quản lý sự kiện; Admin quản lý người dùng/danh mục và xét duyệt UC31–36. Xem [tài liệu API](api-endpoints.md) và [API quản trị](api-endpoints.md#admin-api).
+
+### Tài chính Admin UC37–UC42
+
+Đã có API thống kê số lượng/số dư, đọc đối soát sự kiện CANCELED và danh sách/chi tiết/duyệt/từ chối yêu cầu rút tiền. Hợp đồng ở [admin-finance-api.md](admin-finance-api.md). Doanh thu/phí chụp theo payment; đã có hoàn tự động VNPAY, đối soát và hoàn thủ công với tài khoản/chứng từ riêng cho Admin. Organizer hủy ngay trước giờ bắt đầu, Admin chủ động xếp hàng hoàn. Merchant sandbox cần nghiệm thu quyền query/refund. UC41 ghi nhận chuyển khoản đã thực hiện bên ngoài. Các phụ thuộc và trạng thái triển khai được theo dõi tại `../plan.md`.
 
 ### Quản trị UC31–36
 
@@ -70,11 +74,11 @@ Mở thư mục dự án hoặc import `pom.xml` dưới dạng Maven project tr
 
 Chạy lệnh tại thư mục gốc, nơi chứa `pom.xml`:
 
-| Công việc | Windows PowerShell | macOS / Linux |
-| --- | --- | --- |
-| Chạy ứng dụng | `.\mvnw.cmd spring-boot:run` | `./mvnw spring-boot:run` |
-| Chạy kiểm thử | `.\mvnw.cmd test` | `./mvnw test` |
-| Build và kiểm tra trước khi gửi PR | `.\mvnw.cmd clean verify` | `./mvnw clean verify` |
+| Công việc                          | Windows PowerShell           | macOS / Linux            |
+| ---------------------------------- | ---------------------------- | ------------------------ |
+| Chạy ứng dụng                      | `.\mvnw.cmd spring-boot:run` | `./mvnw spring-boot:run` |
+| Chạy kiểm thử                      | `.\mvnw.cmd test`            | `./mvnw test`            |
+| Build và kiểm tra trước khi gửi PR | `.\mvnw.cmd clean verify`    | `./mvnw clean verify`    |
 
 Trên macOS/Linux, nếu thiếu quyền thực thi, chạy `chmod +x mvnw` một lần.
 
@@ -87,11 +91,11 @@ Cấu hình chung đặt tại `src/main/resources/application.properties`. Dùn
 Ứng dụng mặc định kết nối `jdbc:postgresql://localhost:5432/eventhub_db`, user `postgres`.
 Database cần được tạo sẵn; Flyway tạo các bảng khi ứng dụng khởi động.
 
-| Biến môi trường | Mặc định |
-| --- | --- |
-| `DB_URL` | `jdbc:postgresql://localhost:5432/eventhub_db` |
-| `DB_USERNAME` | `postgres` |
-| `DB_PASSWORD` | Trống; cần đặt mật khẩu PostgreSQL của máy |
+| Biến môi trường | Mặc định                                       |
+| --------------- | ---------------------------------------------- |
+| `DB_URL`        | `jdbc:postgresql://localhost:5432/eventhub_db` |
+| `DB_USERNAME`   | `postgres`                                     |
+| `DB_PASSWORD`   | Trống; cần đặt mật khẩu PostgreSQL của máy     |
 
 PowerShell:
 
@@ -140,7 +144,7 @@ Frontend cần gửi credentials và header `X-CSRF-Protection: 1` khi gọi POS
 
 - Giá vé và customer lấy từ backend/phiên đăng nhập. Cấu hình hiện tại giữ vé 5 phút, tối đa đến lúc đóng bán hoặc bắt đầu sự kiện. Booking có payment VNPay PENDING được giữ thêm 120 giây để chờ IPN; hạn bắt đầu/thực hiện thanh toán không thay đổi. Job chạy mỗi 30 giây trả vé đủ điều kiện hết hạn về kho; khóa PostgreSQL bảo vệ khi nhiều người đặt/thanh toán đồng thời.
 - VNPay Sandbox dùng HMAC-SHA512, kiểm tra merchant, số tiền và mã giao dịch. IPN cập nhật payment và phát một vé/mã QR token cho mỗi vé đã mua trong cùng transaction. Return URL chỉ hiển thị kết quả; frontend đọc lại booking để biết trạng thái đã xác nhận.
-- Booking tổng tiền bằng 0 được xác nhận và phát vé ngay, phương thức `FREE`. Booking có IPN thành công sau khi đã trả vé về kho hoặc khi sự kiện không còn APPROVED chuyển `PAYMENT_REVIEW`, lưu payment thành công để đối soát; chưa có API hoàn tiền trong phạm vi này.
+- Booking tổng tiền bằng 0 được xác nhận và phát vé ngay, phương thức `FREE`. Booking có IPN thành công sau khi đã trả vé về kho hoặc khi sự kiện không còn APPROVED chuyển `PAYMENT_REVIEW`, lưu payment thành công để đối soát; hồ sơ hoàn tiền được tạo để Admin xử lý trên dashboard (xem admin-finance-api.md).
 - Flyway V6 chỉ thêm hai cột payment và index, giữ nguyên bảng/dữ liệu và migration cũ. Chưa cấu hình VNPay thì tính năng khác vẫn khởi động, riêng tạo URL thanh toán trả `503`.
 
 Đăng ký merchant tại [VNPay Sandbox](https://sandbox.vnpayment.vn/devreg/), rồi cấu hình qua biến môi trường hoặc `application-local.properties` đã được Git bỏ qua:
@@ -157,7 +161,7 @@ app.vnpay.return-url=http://localhost:5173/customer/payment-result
 | `VNPAY_HASH_SECRET` | Trống; khóa Sandbox, chỉ lưu ở backend |
 | `VNPAY_PAYMENT_URL` | `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html` |
 | `VNPAY_RETURN_URL` | `http://localhost:5173/customer/payment-result` |
-| `BOOKING_HOLD_TTL` | `5m` trong application.properties; chấp nhận từ 1–30 phút, số giây nguyên |
+| `BOOKING_HOLD_TTL` | `5m` trong application.properties; chấp nhận từ 60–500 giây, số giây nguyên |
 | `BOOKING_IPN_GRACE_PERIOD` | `120s`; thời gian giữ thêm khi chờ IPN, 0–300 giây nguyên; `0s` tắt khoảng chờ |
 | `BOOKING_EXPIRY_ENABLED` | `true`; bật job giải phóng vé hết hạn |
 | `BOOKING_EXPIRY_DELAY` | `30s`; khoảng cách giữa các lần chạy job |
@@ -204,10 +208,10 @@ Form frontend dùng `GET /api/categories` để lấy danh mục trong DB. Ảnh
 
 Cấu hình ba biến môi trường **trên backend** (lấy từ API Keys trong Cloudinary Console):
 
-| Biến môi trường | Giá trị |
-| --- | --- |
-| `CLOUDINARY_CLOUD_NAME` | Cloud name của môi trường Cloudinary |
-| `CLOUDINARY_API_KEY` | API key |
+| Biến môi trường         | Giá trị                                                  |
+| ----------------------- | -------------------------------------------------------- |
+| `CLOUDINARY_CLOUD_NAME` | Cloud name của môi trường Cloudinary                     |
+| `CLOUDINARY_API_KEY`    | API key                                                  |
 | `CLOUDINARY_API_SECRET` | API secret; không đặt trong frontend hoặc commit vào Git |
 
 Hoặc đặt `app.cloudinary.cloud-name`, `app.cloudinary.api-key`, `app.cloudinary.api-secret` trong `application-local.properties` đã được Git bỏ qua. Khởi động lại backend sau khi cấu hình. Thiếu cấu hình thì tạo sự kiện multipart trả `503` và rollback; các API khác vẫn hoạt động. Không cần unsigned upload preset. Ảnh upload vào `eventhub/events` với ID UUID riêng cho mỗi lần tạo. Nếu upload hoặc lưu DB thất bại, transaction rollback và backend gọi destroy cho các ID của lần tạo đó. Cloudinary và PostgreSQL không có transaction chung: nếu destroy cũng thất bại, backend ghi log để xử lý ảnh còn lại, không che lỗi tạo sự kiện. Hủy bản nháp chưa gửi không tạo ảnh trên Cloudinary. Chi tiết trong [tài liệu API](api-endpoints.md#9-ảnh-dùng-trong-form-tạo-sự-kiện).
@@ -272,24 +276,23 @@ eventhub-backend/
 
 Các đường dẫn trong bảng dưới đây tính từ `src/main/java/com/eventhub/backend/`:
 
-| Thư mục | Đặt những gì ở đây? | Ví dụ |
-| --- | --- | --- |
-| `config/` | Cấu hình Spring, bean dùng chung, CORS | `WebConfig.java` |
-| `controller/` | Endpoint, nhận request và trả HTTP response | `EventController.java` |
-| `service/` | Xử lý nghiệp vụ; chỉ tách interface/implementation khi cần | `AuthService.java` |
-| `repository/` | Truy vấn và lưu dữ liệu khi bổ sung tầng persistence | `EventRepository.java` |
-| `entity/` | Đối tượng ánh xạ dữ liệu database khi bổ sung JPA | `Event.java`, `User.java` |
-| `dto/request/` | Dữ liệu nhận từ client, quy tắc validation đầu vào | `CreateEventRequest.java` |
-| `dto/response/` | Dữ liệu trả cho client | `EventResponse.java` |
-| `mapper/` | Chuyển đổi giữa entity và DTO | `EventMapper.java` |
-| `security/` | Cấu hình bảo mật, xác thực, phân quyền và filter | `SecurityConfig.java` |
-| `exception/` | Exception nghiệp vụ và xử lý lỗi API tập trung | `ResourceNotFoundException.java`, `GlobalExceptionHandler.java` |
-| `enums/` | Tập giá trị cố định trong miền nghiệp vụ | `EventStatus.java` |
-| `integration/` | Client kết nối dịch vụ bên ngoài | `PaymentClient.java`, `EmailClient.java` |
-| `util/` | Hàm tiện ích dùng chung, không chứa nghiệp vụ | `DateTimeUtils.java` |
+| Thư mục         | Đặt những gì ở đây?                                        | Ví dụ                                                           |
+| --------------- | ---------------------------------------------------------- | --------------------------------------------------------------- |
+| `config/`       | Cấu hình Spring, bean dùng chung, CORS                     | `WebConfig.java`                                                |
+| `controller/`   | Endpoint, nhận request và trả HTTP response                | `EventController.java`                                          |
+| `service/`      | Xử lý nghiệp vụ; chỉ tách interface/implementation khi cần | `AuthService.java`                                              |
+| `repository/`   | Truy vấn và lưu dữ liệu khi bổ sung tầng persistence       | `EventRepository.java`                                          |
+| `entity/`       | Đối tượng ánh xạ dữ liệu database khi bổ sung JPA          | `Event.java`, `User.java`                                       |
+| `dto/request/`  | Dữ liệu nhận từ client, quy tắc validation đầu vào         | `CreateEventRequest.java`                                       |
+| `dto/response/` | Dữ liệu trả cho client                                     | `EventResponse.java`                                            |
+| `mapper/`       | Chuyển đổi giữa entity và DTO                              | `EventMapper.java`                                              |
+| `security/`     | Cấu hình bảo mật, xác thực, phân quyền và filter           | `SecurityConfig.java`                                           |
+| `exception/`    | Exception nghiệp vụ và xử lý lỗi API tập trung             | `ResourceNotFoundException.java`, `GlobalExceptionHandler.java` |
+| `enums/`        | Tập giá trị cố định trong miền nghiệp vụ                   | `EventStatus.java`                                              |
+| `integration/`  | Client kết nối dịch vụ bên ngoài                           | `PaymentClient.java`, `EmailClient.java`                        |
+| `util/`         | Hàm tiện ích dùng chung, không chứa nghiệp vụ              | `DateTimeUtils.java`                                            |
 
 `resources/static/` chứa tài nguyên tĩnh; `resources/templates/` chứa template render phía server nếu sử dụng. Backend chỉ cung cấp REST API có thể để trống hai thư mục này. Các bài kiểm thử nằm trong `src/test/java/com/eventhub/backend/`, tổ chức theo package tương ứng với mã nguồn.
-
 
 ### Luồng xử lý và quy ước code
 
@@ -311,14 +314,14 @@ Client → Controller → Service → Repository → Database
 
 ### Vai trò các nhánh
 
-| Nhánh | Mục đích | Cách cập nhật |
-| --- | --- | --- |
-| `main` | Phiên bản ổn định dùng để phát hành hoặc bàn giao | Người phụ trách tạo PR từ `develop` vào `main` sau khi kiểm tra |
-| `develop` | Tích hợp công việc của các thành viên | Nhận PR đã review từ các nhánh công việc |
-| `feature/...` | Phát triển một tính năng | Tạo từ `develop`, gửi PR vào `develop` |
-| `fix/...` | Sửa một lỗi | Tạo từ `develop`, gửi PR vào `develop` |
-| `docs/...` | Cập nhật tài liệu | Tạo từ `develop`, gửi PR vào `develop` |
-| `refactor/...`, `chore/...` | Cải tổ code hoặc chỉnh cấu hình, công cụ | Tạo từ `develop`, gửi PR vào `develop` |
+| Nhánh                       | Mục đích                                          | Cách cập nhật                                                   |
+| --------------------------- | ------------------------------------------------- | --------------------------------------------------------------- |
+| `main`                      | Phiên bản ổn định dùng để phát hành hoặc bàn giao | Người phụ trách tạo PR từ `develop` vào `main` sau khi kiểm tra |
+| `develop`                   | Tích hợp công việc của các thành viên             | Nhận PR đã review từ các nhánh công việc                        |
+| `feature/...`               | Phát triển một tính năng                          | Tạo từ `develop`, gửi PR vào `develop`                          |
+| `fix/...`                   | Sửa một lỗi                                       | Tạo từ `develop`, gửi PR vào `develop`                          |
+| `docs/...`                  | Cập nhật tài liệu                                 | Tạo từ `develop`, gửi PR vào `develop`                          |
+| `refactor/...`, `chore/...` | Cải tổ code hoặc chỉnh cấu hình, công cụ          | Tạo từ `develop`, gửi PR vào `develop`                          |
 
 **Quy tắc bắt buộc:**
 
@@ -346,7 +349,7 @@ refactor/event-service
 
 ## 5. Quy trình làm việc cho từng thành viên
 
-Ví dụ dưới đây dùng nhánh `feature/create-event`. Thay tên này bằng nhánh của công việc bạn được giao. 
+Ví dụ dưới đây dùng nhánh `feature/create-event`. Thay tên này bằng nhánh của công việc bạn được giao.
 
 ### Bước 1: Cập nhật develop và tạo nhánh
 
@@ -372,6 +375,7 @@ git add .
 git diff --cached
 git commit -m "feat(event): add event creation endpoint"
 ```
+
 ### Bước 3: Đồng bộ với develop trước khi gửi PR
 
 Thực hiện khi đang ở nhánh tính năng và working tree sạch:
@@ -400,17 +404,21 @@ Nội dung PR nên có:
 
 ```markdown
 ## Thay đổi
+
 - Thêm API tạo sự kiện.
 - Kiểm tra dữ liệu đầu vào và trả response DTO.
 
 ## Cách kiểm tra
+
 - Lệnh đã chạy và kết quả thực tế.
 - Các trường hợp thành công/thất bại đã kiểm tra.
 
 ## Ảnh hưởng
+
 - Thay đổi API, database, dependency hoặc cấu hình nếu có.
 
 ## Issue liên quan
+
 - Mã issue hoặc đường dẫn công việc nếu có.
 ```
 
@@ -451,14 +459,14 @@ Viết commit message bằng tiếng Anh, ngắn gọn và mô tả việc đã 
 type(scope): description
 ```
 
-| Type | Khi sử dụng | Ví dụ |
-| --- | --- | --- |
-| `feat` | Thêm tính năng | `feat(event): add event creation endpoint` |
-| `fix` | Sửa lỗi | `fix(event): reject invalid event dates` |
-| `docs` | Sửa tài liệu | `docs: add development and Git workflow guide` |
-| `refactor` | Cải tổ code, giữ nguyên hành vi | `refactor(event): extract response mapping` |
-| `test` | Thêm hoặc sửa kiểm thử | `test(event): cover event creation validation` |
-| `chore` | Cấu hình, công cụ, bảo trì dự án | `chore: initialize Spring Boot backend project structure` |
+| Type       | Khi sử dụng                      | Ví dụ                                                     |
+| ---------- | -------------------------------- | --------------------------------------------------------- |
+| `feat`     | Thêm tính năng                   | `feat(event): add event creation endpoint`                |
+| `fix`      | Sửa lỗi                          | `fix(event): reject invalid event dates`                  |
+| `docs`     | Sửa tài liệu                     | `docs: add development and Git workflow guide`            |
+| `refactor` | Cải tổ code, giữ nguyên hành vi  | `refactor(event): extract response mapping`               |
+| `test`     | Thêm hoặc sửa kiểm thử           | `test(event): cover event creation validation`            |
+| `chore`    | Cấu hình, công cụ, bảo trì dự án | `chore: initialize Spring Boot backend project structure` |
 
 Tránh message như `update`, `fix bug`, `done`, `abc` vì không giúp người khác hiểu thay đổi.
 

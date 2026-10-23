@@ -44,7 +44,7 @@ public class WithdrawalRequestServiceImpl implements WithdrawalRequestService {
                                         "INVALID_AMOUNT", "Số tiền phải lớn hơn 0");
                 }
 
-                OrganizerWallet wallet = organizerWalletRepository.findByOrganizerId(organizerId)
+                OrganizerWallet wallet = organizerWalletRepository.findByOrganizerIdForUpdate(organizerId)
                                 .orElseThrow(() -> new WithdrawalRequestException(HttpStatus.BAD_REQUEST,
                                                 "INSUFFICIENT_BALANCE",
                                                 "Số dư khả dụng không đủ để thực hiện rút tiền"));
@@ -180,7 +180,7 @@ public class WithdrawalRequestServiceImpl implements WithdrawalRequestService {
         public WithdrawalRequestResponse cancelWithdrawalRequest(Integer organizerId, Integer requestId) {
                 validateOrganizer(organizerId);
 
-                WithdrawalRequest request = withdrawalRequestRepository.findByIdAndOrganizerId(requestId, organizerId)
+                WithdrawalRequest request = withdrawalRequestRepository.findOwnedForUpdate(requestId, organizerId)
                                 .orElseThrow(() -> new WithdrawalRequestException(HttpStatus.NOT_FOUND,
                                                 "NOT_FOUND", "Không tìm thấy yêu cầu rút tiền"));
 
@@ -193,9 +193,9 @@ public class WithdrawalRequestServiceImpl implements WithdrawalRequestService {
 
                 // Bước 4: Hủy yêu cầu rút tiền, hoàn lại số tiền từ số dư đang chờ rút về số dư
                 // khả dụng
-                request.setStatus("CANCELLED");
-
-                OrganizerWallet wallet = request.getOrganizerWallet();
+                OrganizerWallet wallet = organizerWalletRepository.findForUpdate(request.getOrganizerWallet().getId())
+                                .orElseThrow(() -> new WithdrawalRequestException(HttpStatus.CONFLICT,
+                                                "WALLET_NOT_FOUND", "Không tìm thấy ví cần đối soát"));
                 BigDecimal amount = request.getAmount();
 
                 BigDecimal availableBalance = wallet.getAvailableBalance() != null
@@ -208,10 +208,12 @@ public class WithdrawalRequestServiceImpl implements WithdrawalRequestService {
                 BigDecimal newAvailable = availableBalance.add(amount).setScale(2, RoundingMode.HALF_UP);
                 BigDecimal newPendingWithdrawal = pendingWithdrawal.subtract(amount);
                 if (newPendingWithdrawal.compareTo(BigDecimal.ZERO) < 0) {
-                        newPendingWithdrawal = BigDecimal.ZERO;
+                        throw new WithdrawalRequestException(HttpStatus.CONFLICT,
+                                        "INSUFFICIENT_RESERVED_BALANCE", "Số dư chờ rút không đủ. Cần đối soát ví.");
                 }
                 newPendingWithdrawal = newPendingWithdrawal.setScale(2, RoundingMode.HALF_UP);
 
+                request.setStatus("CANCELLED");
                 wallet.setAvailableBalance(newAvailable);
                 wallet.setWithdrawalPendingBalance(newPendingWithdrawal);
                 organizerWalletRepository.save(wallet);

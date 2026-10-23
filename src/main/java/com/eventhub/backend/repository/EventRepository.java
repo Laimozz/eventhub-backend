@@ -13,6 +13,9 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
 public interface EventRepository extends JpaRepository<Event, Integer> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select e from Event e where e.id = :eventId")
+    Optional<Event> findForUpdate(Integer eventId);
     @EntityGraph(attributePaths = {"category", "organizer"})
     Page<Event> findByStatus(EventStatus status, Pageable pageable);
 

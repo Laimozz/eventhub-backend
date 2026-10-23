@@ -5,5 +5,12 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface OrganizerWalletRepository extends JpaRepository<OrganizerWallet, Integer> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select w from OrganizerWallet w where w.id = :id")
+    java.util.Optional<OrganizerWallet> findForUpdate(Integer id);
     Optional<OrganizerWallet> findByOrganizerId(Integer organizerId);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select w from OrganizerWallet w where w.organizer.id = :organizerId")
+    Optional<OrganizerWallet> findByOrganizerIdForUpdate(Integer organizerId);
 }

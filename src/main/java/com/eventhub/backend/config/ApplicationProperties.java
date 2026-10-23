@@ -39,7 +39,7 @@ public class ApplicationProperties {
         @NotNull
         private Duration ipnGracePeriod = Duration.ofSeconds(120);
 
-        @AssertTrue(message = "Booking hold must be between 1 and 30 minutes, in whole seconds")
+        @AssertTrue(message = "Booking hold must be between 60 and 500 seconds, in whole seconds")
         public boolean isHoldTtlValid() {
             return holdTtl != null && holdTtl.getNano() == 0
                     && holdTtl.getSeconds() >= 60 && holdTtl.getSeconds() <= 500;
@@ -62,6 +62,8 @@ public class ApplicationProperties {
         private String paymentUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
         @NotBlank
         private String returnUrl = "http://localhost:5173/customer/payment-result";
+        private String apiUrl = "https://sandbox.vnpayment.vn/merchant_webapi/api/transaction";
+        private String apiIpAddress = "127.0.0.1";
     }
 
     @Getter
