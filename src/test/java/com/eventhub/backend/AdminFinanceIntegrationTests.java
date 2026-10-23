@@ -159,7 +159,7 @@ class AdminFinanceIntegrationTests {
         assertThat(balance("total_withdrawn")).isEqualByComparingTo("20");
     }
     @Test void notificationFailureRollsBackRequestWalletAndPayout() {
-        doThrow(new IllegalStateException("Test notification failure")).when(notifications).saveAndFlush(any(Notification.class));
+        doThrow(new IllegalStateException("Test notification failure")).when(notifications).save(any(Notification.class));
         assertThatThrownBy(() -> withdrawals.decide(admin.getId(), requestId, "ROLLBACK-" + requestId, null))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(balance("withdrawal_pending_balance")).isEqualByComparingTo("300");
@@ -213,7 +213,8 @@ class AdminFinanceIntegrationTests {
         BigDecimal available = jdbc.queryForObject("SELECT sum(available_balance) FROM organizer_wallets", BigDecimal.class);
         mvc.perform(get("/api/admin/statistics").cookie(access)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.availableBalance").value(available.doubleValue()))
-                .andExpect(jsonPath("$.grossRevenue").isEmpty()).andExpect(jsonPath("$.netRevenue").isEmpty());
+                .andExpect(jsonPath("$.grossRevenue").isNumber()).andExpect(jsonPath("$.netRevenue").isNumber())
+                .andExpect(jsonPath("$.totalRefunded").isNumber());
         mvc.perform(get("/api/admin/refund-events/2147483647").cookie(access)).andExpect(status().isNotFound());
     }
 
@@ -245,7 +246,7 @@ class AdminFinanceIntegrationTests {
                     .andExpect(jsonPath("$.items[0].id").value(event));
             for (int i = 0; i < 2; i++)
                 mvc.perform(get("/api/admin/refund-events/" + event).cookie(access)).andExpect(status().isOk())
-                        .andExpect(jsonPath("$.canRefund").value(false)).andExpect(jsonPath("$.payments.items[0].paidAmount").value(100))
+                        .andExpect(jsonPath("$.canRefund").value(true)).andExpect(jsonPath("$.payments.items[0].paidAmount").value(100))
                         .andExpect(jsonPath("$.payments.items[0].refundAmount").value(50))
                         .andExpect(jsonPath("$.payments.items[0].refundStatus").value("PROVIDER_TEST_PARTIAL"));
             assertThat(jdbc.queryForObject("SELECT count(*) FROM refunds WHERE payments_id=?", Integer.class, payment)).isEqualTo(1);

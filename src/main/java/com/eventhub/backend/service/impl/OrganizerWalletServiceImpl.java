@@ -34,6 +34,7 @@ public class OrganizerWalletServiceImpl implements OrganizerWalletService {
     private final EventRepository eventRepository;
     private final TicketTypeRepository ticketTypeRepository;
     private final UserRepository userRepository;
+    private final com.eventhub.backend.repository.FinanceLedgerRepository financeLedger;
 
     @Override
     public OrganizerWalletResponse getWalletAndRevenue(Integer organizerId) {
@@ -47,7 +48,6 @@ public class OrganizerWalletServiceImpl implements OrganizerWalletService {
 
         List<Event> events = eventRepository.findByOrganizerIdOrderByIdAsc(organizerId);
 
-        int totalSoldTicketsAcrossAllEvents = 0;
         List<EventRevenueResponse> eventRevenues = new ArrayList<>();
 
         for (Event event : events) {
@@ -55,7 +55,7 @@ public class OrganizerWalletServiceImpl implements OrganizerWalletService {
 
             int eventSoldTickets = 0;
             int eventTotalTickets = 0;
-            BigDecimal eventRevenue = BigDecimal.ZERO;
+            BigDecimal eventRevenue = financeLedger.eventRevenue(event.getId());
 
             for (TicketType tt : ticketTypes) {
                 int quantity = tt.getQuantity() != null ? tt.getQuantity() : 0;
@@ -63,16 +63,11 @@ public class OrganizerWalletServiceImpl implements OrganizerWalletService {
                 int reserved = tt.getReservedQuantity() != null ? tt.getReservedQuantity() : 0;
                 int sold = Math.max(0, quantity - remaining - reserved);
 
-                BigDecimal price = tt.getPrice() != null ? tt.getPrice() : BigDecimal.ZERO;
-                BigDecimal revenue = price.multiply(BigDecimal.valueOf(sold));
-
                 eventSoldTickets += sold;
                 eventTotalTickets += quantity;
-                eventRevenue = eventRevenue.add(revenue);
             }
 
-            if (eventSoldTickets > 0) {
-                totalSoldTicketsAcrossAllEvents += eventSoldTickets;
+            if (eventSoldTickets > 0 || eventRevenue.signum() > 0) {
                 BigDecimal finalRevenue = eventRevenue.setScale(2, RoundingMode.HALF_UP);
                 eventRevenues.add(new EventRevenueResponse(
                         event.getId(),
@@ -85,18 +80,6 @@ public class OrganizerWalletServiceImpl implements OrganizerWalletService {
             }
         }
 
-        // Exception 2.1: Nhà tổ chức chưa từng bán vé sự kiện nào -> toàn bộ số dư bằng 0 và danh sách doanh thu trống
-        if (totalSoldTicketsAcrossAllEvents == 0) {
-            BigDecimal zero = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
-            return new OrganizerWalletResponse(
-                    zero, "0đ",
-                    zero, "0đ",
-                    zero, "0đ",
-                    zero, "0đ",
-                    List.of()
-            );
-        }
-
         // Lấy thông tin ví của Nhà tổ chức
         OrganizerWallet wallet = organizerWalletRepository.findByOrganizerId(organizerId)
                 .orElseGet(() -> {
@@ -106,7 +89,7 @@ public class OrganizerWalletServiceImpl implements OrganizerWalletService {
                     newWallet.setAvailableBalance(BigDecimal.ZERO);
                     newWallet.setWithdrawalPendingBalance(BigDecimal.ZERO);
                     newWallet.setTotalWithdrawn(BigDecimal.ZERO);
-                    return organizerWalletRepository.save(newWallet);
+                    return newWallet;
                 });
 
         BigDecimal pendingBalance = (wallet.getPendingBalance() != null ? wallet.getPendingBalance() : BigDecimal.ZERO)

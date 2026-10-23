@@ -126,6 +126,33 @@ class WithdrawalRequestServiceTest {
                 }
         }
 
+        @Test
+        void shouldCancelWithLockedRequestAndWalletWithoutLosingReservedMoney() {
+                when(userRepository.findById(1)).thenReturn(Optional.of(organizer));
+                WithdrawalRequest request = new WithdrawalRequest();
+                request.setId(7); request.setOrganizerWallet(wallet); request.setAmount(new BigDecimal("1000000")); request.setStatus("PENDING");
+                when(withdrawalRequestRepository.findOwnedForUpdate(7, 1)).thenReturn(Optional.of(request));
+                when(organizerWalletRepository.findForUpdate(10)).thenReturn(Optional.of(wallet));
+                when(withdrawalRequestRepository.save(request)).thenReturn(request);
+                var result = withdrawalRequestService.cancelWithdrawalRequest(1, 7);
+                assertThat(result.status()).isEqualTo("CANCELLED");
+                assertThat(wallet.getAvailableBalance()).isEqualByComparingTo("43300000");
+                assertThat(wallet.getWithdrawalPendingBalance()).isEqualByComparingTo("4000000");
+        }
+
+        @Test
+        void shouldRejectInconsistentReservationInsteadOfClampingBalanceToZero() {
+                when(userRepository.findById(1)).thenReturn(Optional.of(organizer));
+                WithdrawalRequest request = new WithdrawalRequest();
+                request.setId(7); request.setOrganizerWallet(wallet); request.setAmount(new BigDecimal("6000000")); request.setStatus("PENDING");
+                when(withdrawalRequestRepository.findOwnedForUpdate(7, 1)).thenReturn(Optional.of(request));
+                when(organizerWalletRepository.findForUpdate(10)).thenReturn(Optional.of(wallet));
+                assertThatThrownBy(() -> withdrawalRequestService.cancelWithdrawalRequest(1, 7)).isInstanceOf(WithdrawalRequestException.class);
+                assertThat(request.getStatus()).isEqualTo("PENDING");
+                assertThat(wallet.getWithdrawalPendingBalance()).isEqualByComparingTo("5000000");
+                verify(organizerWalletRepository, never()).save(any());
+        }
+
         @Nested
         @DisplayName("Exception 3.1 — Số tiền > số dư khả dụng")
         class InsufficientBalanceTests {
@@ -134,7 +161,7 @@ class WithdrawalRequestServiceTest {
                 @DisplayName("Ném lỗi INSUFFICIENT_BALANCE khi số tiền vượt quá số dư khả dụng")
                 void shouldThrowInsufficientBalanceWhenAmountExceedsAvailable() {
                         when(userRepository.findById(1)).thenReturn(Optional.of(organizer));
-                        when(organizerWalletRepository.findByOrganizerId(1)).thenReturn(Optional.of(wallet));
+                        when(organizerWalletRepository.findByOrganizerIdForUpdate(1)).thenReturn(Optional.of(wallet));
 
                         var request = new CreateWithdrawalRequest(
                                         new BigDecimal("50000000"), "Vietcombank", "0123456789");
@@ -154,7 +181,7 @@ class WithdrawalRequestServiceTest {
                 @DisplayName("Ném lỗi INSUFFICIENT_BALANCE khi ví không tồn tại")
                 void shouldThrowInsufficientBalanceWhenWalletNotFound() {
                         when(userRepository.findById(1)).thenReturn(Optional.of(organizer));
-                        when(organizerWalletRepository.findByOrganizerId(1)).thenReturn(Optional.empty());
+                        when(organizerWalletRepository.findByOrganizerIdForUpdate(1)).thenReturn(Optional.empty());
 
                         var request = new CreateWithdrawalRequest(
                                         new BigDecimal("10000000"), "Vietcombank", "0123456789");
@@ -216,7 +243,7 @@ class WithdrawalRequestServiceTest {
                 @DisplayName("Tạo yêu cầu rút tiền thành công, trừ số dư khả dụng, cộng chờ rút")
                 void shouldCreateWithdrawalRequestSuccessfully() {
                         when(userRepository.findById(1)).thenReturn(Optional.of(organizer));
-                        when(organizerWalletRepository.findByOrganizerId(1)).thenReturn(Optional.of(wallet));
+                        when(organizerWalletRepository.findByOrganizerIdForUpdate(1)).thenReturn(Optional.of(wallet));
 
                         WithdrawalRequest saved = new WithdrawalRequest();
                         saved.setId(1);
@@ -256,7 +283,7 @@ class WithdrawalRequestServiceTest {
                 @DisplayName("Rút hết số dư khả dụng thành công")
                 void shouldAllowWithdrawingEntireAvailableBalance() {
                         when(userRepository.findById(1)).thenReturn(Optional.of(organizer));
-                        when(organizerWalletRepository.findByOrganizerId(1)).thenReturn(Optional.of(wallet));
+                        when(organizerWalletRepository.findByOrganizerIdForUpdate(1)).thenReturn(Optional.of(wallet));
 
                         WithdrawalRequest saved = new WithdrawalRequest();
                         saved.setId(2);
@@ -286,7 +313,7 @@ class WithdrawalRequestServiceTest {
                 @DisplayName("Kiểm tra thông tin WithdrawalRequest được lưu đúng")
                 void shouldSaveWithdrawalRequestWithCorrectFields() {
                         when(userRepository.findById(1)).thenReturn(Optional.of(organizer));
-                        when(organizerWalletRepository.findByOrganizerId(1)).thenReturn(Optional.of(wallet));
+                        when(organizerWalletRepository.findByOrganizerIdForUpdate(1)).thenReturn(Optional.of(wallet));
 
                         WithdrawalRequest saved = new WithdrawalRequest();
                         saved.setId(3);

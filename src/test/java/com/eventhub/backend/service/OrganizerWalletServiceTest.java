@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -46,6 +47,7 @@ class OrganizerWalletServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock private com.eventhub.backend.repository.FinanceLedgerRepository financeLedger;
     @InjectMocks
     private OrganizerWalletServiceImpl organizerWalletService;
 
@@ -138,7 +140,9 @@ class OrganizerWalletServiceTest {
 
             when(userRepository.findById(1)).thenReturn(Optional.of(organizer));
             when(eventRepository.findByOrganizerIdOrderByIdAsc(1)).thenReturn(List.of(event1, event2));
+            when(financeLedger.eventRevenue(10)).thenReturn(new BigDecimal("97500000.00"));
             when(ticketTypeRepository.findByEventIdOrderByIdAsc(10)).thenReturn(List.of(ticket1));
+            when(financeLedger.eventRevenue(20)).thenReturn(new BigDecimal("105000000.00"));
             when(ticketTypeRepository.findByEventIdOrderByIdAsc(20)).thenReturn(List.of(ticket2));
             when(organizerWalletRepository.findByOrganizerId(1)).thenReturn(Optional.of(wallet));
 
@@ -200,13 +204,14 @@ class OrganizerWalletServiceTest {
 
             when(userRepository.findById(1)).thenReturn(Optional.of(organizer));
             when(eventRepository.findByOrganizerIdOrderByIdAsc(1)).thenReturn(List.of(event1));
+            when(financeLedger.eventRevenue(10)).thenReturn(new BigDecimal("97500000.00"));
             when(ticketTypeRepository.findByEventIdOrderByIdAsc(10)).thenReturn(List.of(ticket1));
             when(organizerWalletRepository.findByOrganizerId(1)).thenReturn(Optional.empty());
-            when(organizerWalletRepository.save(any(OrganizerWallet.class))).thenReturn(newWallet);
+
 
             OrganizerWalletResponse response = organizerWalletService.getWalletAndRevenue(1);
 
-            verify(organizerWalletRepository).save(any(OrganizerWallet.class));
+            verify(organizerWalletRepository, never()).save(any(OrganizerWallet.class));
             assertThat(response.availableBalance()).isEqualByComparingTo("0.00");
             assertThat(response.formattedAvailableBalance()).isEqualTo("0đ");
             assertThat(response.eventRevenues()).hasSize(1);
@@ -252,6 +257,7 @@ class OrganizerWalletServiceTest {
 
             when(userRepository.findById(1)).thenReturn(Optional.of(organizer));
             when(eventRepository.findByOrganizerIdOrderByIdAsc(1)).thenReturn(List.of(event1));
+            when(financeLedger.eventRevenue(10)).thenReturn(BigDecimal.ZERO);
             when(ticketTypeRepository.findByEventIdOrderByIdAsc(10)).thenReturn(List.of(ticket1));
 
             OrganizerWalletResponse response = organizerWalletService.getWalletAndRevenue(1);

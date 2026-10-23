@@ -38,7 +38,7 @@ public record EventResponse(
 
     public static boolean canCancel(Event event, LocalDateTime now) {
         return (event.getStatus() == EventStatus.PENDING_APPROVAL || event.getStatus() == EventStatus.APPROVED
-                || event.getStatus() == EventStatus.ONGOING) && event.getEndTime().isAfter(now);
+                || event.getStatus() == EventStatus.REJECTED) && event.getStartTime().isAfter(now);
     }
 
     public record VenueResponse(Integer id, String city, String address, Integer capacity) {

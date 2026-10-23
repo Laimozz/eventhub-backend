@@ -42,6 +42,7 @@ public class BookingService {
     private final ApplicationProperties properties;
     private final Clock clock;
     private final NotificationService notifications;
+    private final FinanceLedgerService financeLedger;
 
     @Transactional(readOnly = true)
     public List<TicketTypeInfo> listTicketTypes(Integer userId, Integer eventId) {
@@ -110,6 +111,8 @@ public class BookingService {
             payment.setPaidAt(now);
             payments.save(payment);
             issueTickets(booking, items);
+            payments.flush();
+            financeLedger.recordPayment(payment);
         }
         bookings.flush();
         return detail(booking);
@@ -216,6 +219,7 @@ public class BookingService {
             booking.setStatus("EXPIRED");
         }
         payments.flush(); // DB errors must reach the controller before it acknowledges the IPN.
+        if (success) financeLedger.recordPayment(payment);
         return ipn("00", "Confirm Success");
     }
 
@@ -282,6 +286,17 @@ public class BookingService {
         notifications.create(booking.getEvent().getOrganizer(), "Có booking được xác nhận",
                 "Booking #" + booking.getId() + " cho sự kiện \"" + booking.getEvent().getName()
                         + "\" đã được xác nhận.", "BOOKING_CONFIRMED");
+    }
+
+    @Transactional
+    public void cancelReservations(Integer eventId) {
+        lockEvent(eventId);
+        var types = ticketTypes.findForUpdate(eventId);
+        for (var booking : bookings.findByEventIdAndStatus(eventId, "PENDING")) {
+            releaseReservation(booking, types);
+            booking.setStatus("EXPIRED");
+        }
+        bookings.flush();
     }
 
     private Detail detail(Booking booking) {

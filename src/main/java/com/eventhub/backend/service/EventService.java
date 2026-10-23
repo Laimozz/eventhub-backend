@@ -54,6 +54,8 @@ public class EventService {
     private final Clock clock;
     private final EventImageService images;
     private final BookingItemRepository bookingItems;
+    private final BookingService bookings;
+    private final com.eventhub.backend.repository.RefundWorkflowRepository refundWorkflow;
 
     @Transactional(readOnly = true)
     public EventListResponse listEvents(Integer organizerId, int page, int size, String search, EventStatus status) {
@@ -104,13 +106,17 @@ public class EventService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Event cannot be canceled in its current state");
         }
         event.setCancelReason(reason.strip());
-        event.setStatus(EventStatus.PENDING_CANCELLATION);
+        event.setStatus(EventStatus.CANCELED);
+        event.setCanceledAt(LocalDateTime.now(clock));
         var savedTickets = ticketTypes.findForUpdate(eventId);
         savedTickets.forEach(ticket -> ticket.setStatus("INACTIVE"));
-        notifyAdmin(event, "Có yêu cầu hủy sự kiện", "EVENT_PENDING_CANCELLATION", "\" vừa được gửi yêu cầu hủy.");
-        notifications.notifyEventParticipants(eventId, "Sự kiện có yêu cầu hủy",
-                "Sự kiện #" + eventId + " đang chờ xét duyệt yêu cầu hủy. Lý do: " + event.getCancelReason(),
-                "EVENT_PENDING_CANCELLATION");
+        bookings.cancelReservations(eventId);
+        refundWorkflow.invalidateTickets(eventId);
+        refundWorkflow.seedEvent(eventId);
+        notifyAdmin(event, "Sự kiện đã hủy, cần xử lý hoàn tiền", "EVENT_CANCELED", "\" đã hủy. Vui lòng kiểm tra danh sách hoàn tiền.");
+        notifications.create(event.getOrganizer(), "Sự kiện đã hủy", "Đã hủy sự kiện #" + eventId + ".", "EVENT_CANCELED");
+        users.findPaidEventRecipients(eventId).forEach(user -> notifications.create(user, "Sự kiện đã hủy",
+                "Sự kiện #" + eventId + " đã hủy. Khoản thanh toán sẽ được Admin xử lý hoàn tiền.", "EVENT_CANCELED"));
         events.flush();
         return EventResponse.from(event, savedTickets, guests.findByEventIdOrderByIdAsc(eventId), LocalDateTime.now(clock));
     }

@@ -10,7 +10,8 @@ public final class AdminFinanceResponses {
     private AdminFinanceResponses() {}
     public record OverviewResponse(long totalEvents, long totalUsers, long totalTicketsSold,
             BigDecimal pendingBalance, BigDecimal availableBalance, BigDecimal withdrawalPendingBalance,
-            BigDecimal totalWithdrawn, BigDecimal grossRevenue, BigDecimal netRevenue, String revenueUnavailableReason) {}
+            BigDecimal totalWithdrawn, BigDecimal grossRevenue, BigDecimal netRevenue, String revenueUnavailableReason,
+            BigDecimal totalRefunded) {}
     public record PayoutResponse(Integer id, BigDecimal amount, String status, String transactionCode,
             String failureReason, LocalDateTime initiatedAt, LocalDateTime completedAt) {
         public static PayoutResponse from(PayoutTransaction p) {

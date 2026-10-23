@@ -50,7 +50,7 @@ public class AdminFinanceService {
                     refund == null ? null : refund.getAmount(), refund == null ? null : refund.getStatus(),
                     refund == null ? null : refund.getRetryCount(), refund == null ? null : refund.getRefundedAt());
         });
-        return new RefundDetailResponse(eventId, event.getName(), event.getCancelReason(), PageResponse.from(rows), false,
-                "Chưa tích hợp cổng hoàn tiền và quy tắc xác định giao dịch đủ điều kiện. Chưa thể thực hiện hoàn tiền.");
+        return new RefundDetailResponse(eventId, event.getName(), event.getCancelReason(), PageResponse.from(rows), true,
+                "Hoàn tiền chỉ bắt đầu sau khi Admin chọn hoàn hàng loạt hoặc xử lý từng giao dịch.");
     }
 }

@@ -5,4 +5,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface RefundRepository extends JpaRepository<Refund, Integer> {
     java.util.List<Refund> findByPaymentIdIn(java.util.Collection<Integer> paymentIds);
+    java.util.Optional<Refund> findByPaymentId(Integer paymentId);
 }

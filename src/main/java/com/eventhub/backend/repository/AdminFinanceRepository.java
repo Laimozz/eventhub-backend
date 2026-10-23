@@ -20,11 +20,14 @@ public class AdminFinanceRepository {
                        coalesce(sum(pending_balance), 0) as pending_balance,
                        coalesce(sum(available_balance), 0) as available_balance,
                        coalesce(sum(withdrawal_pending_balance), 0) as withdrawal_pending_balance,
-                       coalesce(sum(total_withdrawn), 0) as total_withdrawn
+                       coalesce(sum(total_withdrawn), 0) as total_withdrawn,
+                       (select coalesce(sum(amount),0) from payments where status='SUCCESS') as gross_revenue,
+                       (select coalesce(sum(amount),0) from refunds where status='COMPLETED') as total_refunded,
+                       (select coalesce(sum(platform_fee),0) from payment_finances where not reversed) as net_revenue
                 from organizer_wallets
                 """, (rs, row) -> new OverviewResponse(rs.getLong("total_events"), rs.getLong("total_users"),
                         rs.getLong("tickets_sold"), rs.getBigDecimal("pending_balance"), rs.getBigDecimal("available_balance"),
-                        rs.getBigDecimal("withdrawal_pending_balance"), rs.getBigDecimal("total_withdrawn"), null, null,
-                        "Chưa có định nghĩa doanh thu và trạng thái thanh toán thành công trong tài liệu tích hợp."));
+                        rs.getBigDecimal("withdrawal_pending_balance"), rs.getBigDecimal("total_withdrawn"),
+                        rs.getBigDecimal("gross_revenue"), rs.getBigDecimal("net_revenue"), null, rs.getBigDecimal("total_refunded")));
     }
 }

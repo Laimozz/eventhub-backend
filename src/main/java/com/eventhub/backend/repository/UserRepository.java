@@ -26,6 +26,13 @@ public interface UserRepository extends JpaRepository<User, Integer> {
             """)
     java.util.List<User> findEventNotificationRecipients(Integer eventId);
 
+    @Query("""
+            select u from User u where u.role = com.eventhub.backend.enums.Role.CUSTOMER
+            and exists (select p.id from Payment p where p.booking.user = u
+                and p.booking.event.id = :eventId and p.status = 'SUCCESS')
+            """)
+    java.util.List<User> findPaidEventRecipients(Integer eventId);
+
     @Query("select u from User u where lower(trim(u.email)) = :email")
     Optional<User> findByNormalizedEmail(String email);
 

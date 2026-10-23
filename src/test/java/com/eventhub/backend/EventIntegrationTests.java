@@ -116,6 +116,7 @@ class EventIntegrationTests {
 
     @AfterEach
     void cleanOnlyThisTestsData() throws Exception {
+        jdbc.update("DELETE FROM notifications WHERE users_id = ?", organizer.getId());
         if (admin != null) {
             jdbc.update("DELETE FROM notifications WHERE users_id = ?", admin.getId());
         }
@@ -611,18 +612,18 @@ class EventIntegrationTests {
     }
 
     @Test
-    void shouldRequestCancellationAndBlockFurtherChangesWhileAwaitingAdmin() throws Exception {
+    void shouldCancelImmediatelyBeforeStartAndBlockFurtherChanges() throws Exception {
         createAdmin("ACTIVE");
         int eventId = createEventId();
         var body = updateRequest(eventId);
         mvc.perform(post("/api/events/{eventId}/cancel", eventId).cookie(access).header("X-CSRF-Protection", "1")
                 .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"  Venue unavailable  \"}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PENDING_CANCELLATION"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELED"))
                 .andExpect(jsonPath("$.cancelReason").value("Venue unavailable"))
-                .andExpect(jsonPath("$.canceledAt").isEmpty()).andExpect(jsonPath("$.canEdit").value(false))
+                .andExpect(jsonPath("$.canceledAt").isNotEmpty()).andExpect(jsonPath("$.canEdit").value(false))
                 .andExpect(jsonPath("$.canCancel").value(false))
                 .andExpect(jsonPath("$.ticketTypes[0].status").value("INACTIVE"));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications WHERE type = 'EVENT_PENDING_CANCELLATION' AND users_id = ?",
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications WHERE type = 'EVENT_CANCELED' AND users_id = ?",
                 Integer.class, admin.getId())).isEqualTo(1);
         update(eventId, body, Map.of()).andExpect(status().isConflict());
         mvc.perform(post("/api/events/{eventId}/cancel", eventId).cookie(access).header("X-CSRF-Protection", "1")

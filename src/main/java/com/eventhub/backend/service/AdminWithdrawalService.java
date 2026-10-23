@@ -21,12 +21,12 @@ public class AdminWithdrawalService {
     private final OrganizerWalletRepository wallets;
     private final PayoutTransactionRepository payouts;
     private final UserRepository users;
-    private final NotificationRepository notifications;
+    private final NotificationService notifications;
     private final Clock clock;
 
     @Transactional(readOnly = true)
     public PageResponse<WithdrawalResponse> list(String status, int page, int pageSize) {
-        if (status != null && !List.of("PENDING", "APPROVED", "REJECTED").contains(status))
+        if (status != null && !List.of("PENDING", "APPROVED", "REJECTED", "CANCELLED").contains(status))
             throw error(HttpStatus.BAD_REQUEST, "INVALID_STATUS", "Trạng thái không hợp lệ");
         return PageResponse.from(requests.search(status, AdminPagination.page(page, pageSize))
                 .map(r -> WithdrawalResponse.from(r, false, List.of())));
@@ -81,12 +81,10 @@ public class AdminWithdrawalService {
         request.setProcessedAt(now);
         wallets.saveAndFlush(wallet);
         requests.saveAndFlush(request);
-        Notification notification = new Notification();
-        notification.setUser(wallet.getOrganizer());
-        notification.setTitle("Yêu cầu rút tiền #" + id + (approved ? " đã được duyệt" : " bị từ chối"));
-        notification.setType(approved ? "WITHDRAWAL_APPROVED" : "WITHDRAWAL_REJECTED");
-        notification.setContent(approved ? "Admin đã ghi nhận chuyển khoản cho yêu cầu #" + id + "." : value);
-        notifications.saveAndFlush(notification);
+        notifications.create(wallet.getOrganizer(),
+                "Yêu cầu rút tiền #" + id + (approved ? " đã được duyệt" : " bị từ chối"),
+                approved ? "Admin đã ghi nhận chuyển khoản cho yêu cầu #" + id + "." : value,
+                approved ? "WITHDRAWAL_APPROVED" : "WITHDRAWAL_REJECTED");
         return response(request);
     }
 

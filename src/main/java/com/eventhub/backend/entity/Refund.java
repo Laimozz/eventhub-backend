@@ -35,10 +35,12 @@ public class Refund {
 
     @Setter(AccessLevel.NONE)
     @Column(name = "created_at", nullable = false, updatable = false)
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.LOCAL_DATE_TIME)
     private LocalDateTime createdAt;
 
     @Setter(AccessLevel.NONE)
     @Column(name = "updated_at", nullable = false)
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.LOCAL_DATE_TIME)
     private LocalDateTime updatedAt;
 
     @OneToOne(fetch = FetchType.LAZY, optional = false)
@@ -61,7 +63,23 @@ public class Refund {
     private String lastError;
 
     @Column(name = "refunded_at", nullable = true)
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.LOCAL_DATE_TIME)
     private LocalDateTime refundedAt;
+
+    @Column(name = "method")
+    private String method;
+
+    @Column(name = "requested_by")
+    private Integer requestedBy;
+
+    @Column(name = "provider_reference")
+    private String providerReference;
+
+    @Column(name = "response_code")
+    private String responseCode;
+
+    @Column(name = "transaction_status")
+    private String transactionStatus;
 
     @PrePersist
     private void initializeTimestamps() {

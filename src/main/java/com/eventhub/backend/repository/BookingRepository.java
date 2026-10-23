@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 public interface BookingRepository extends JpaRepository<Booking, Integer> {
+    List<Booking> findByEventIdAndStatus(Integer eventId, String status);
     @EntityGraph(attributePaths = {"event", "event.venue"})
     Page<Booking> findByUserId(Integer userId, Pageable pageable);
 

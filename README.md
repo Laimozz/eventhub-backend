@@ -17,7 +17,7 @@ Hiện tại dự án có entity/repository, migration Flyway và kiểm thử t
 
 ### Tài chính Admin UC37–UC42
 
-Đã có API thống kê số lượng/số dư, đọc đối soát sự kiện CANCELED và danh sách/chi tiết/duyệt/từ chối yêu cầu rút tiền. Hợp đồng ở [admin-finance-api.md](admin-finance-api.md). Doanh thu vẫn null; chưa có API thực hiện hoàn tiền, provider/retry hoặc bước duyệt hủy chính thức. UC41 ghi nhận chuyển khoản đã thực hiện bên ngoài. Các phụ thuộc và trạng thái triển khai được theo dõi tại `../plan.md`.
+Đã có API thống kê số lượng/số dư, đọc đối soát sự kiện CANCELED và danh sách/chi tiết/duyệt/từ chối yêu cầu rút tiền. Hợp đồng ở [admin-finance-api.md](admin-finance-api.md). Doanh thu/phí chụp theo payment; đã có hoàn tự động VNPAY, đối soát và hoàn thủ công với tài khoản/chứng từ riêng cho Admin. Organizer hủy ngay trước giờ bắt đầu, Admin chủ động xếp hàng hoàn. Merchant sandbox cần nghiệm thu quyền query/refund. UC41 ghi nhận chuyển khoản đã thực hiện bên ngoài. Các phụ thuộc và trạng thái triển khai được theo dõi tại `../plan.md`.
 
 ### Quản trị UC31–36
 
@@ -144,7 +144,7 @@ Frontend cần gửi credentials và header `X-CSRF-Protection: 1` khi gọi POS
 
 - Giá vé và customer lấy từ backend/phiên đăng nhập. Cấu hình hiện tại giữ vé 5 phút, tối đa đến lúc đóng bán hoặc bắt đầu sự kiện. Booking có payment VNPay PENDING được giữ thêm 120 giây để chờ IPN; hạn bắt đầu/thực hiện thanh toán không thay đổi. Job chạy mỗi 30 giây trả vé đủ điều kiện hết hạn về kho; khóa PostgreSQL bảo vệ khi nhiều người đặt/thanh toán đồng thời.
 - VNPay Sandbox dùng HMAC-SHA512, kiểm tra merchant, số tiền và mã giao dịch. IPN cập nhật payment và phát một vé/mã QR token cho mỗi vé đã mua trong cùng transaction. Return URL chỉ hiển thị kết quả; frontend đọc lại booking để biết trạng thái đã xác nhận.
-- Booking tổng tiền bằng 0 được xác nhận và phát vé ngay, phương thức `FREE`. Booking có IPN thành công sau khi đã trả vé về kho hoặc khi sự kiện không còn APPROVED chuyển `PAYMENT_REVIEW`, lưu payment thành công để đối soát; chưa có API hoàn tiền trong phạm vi này.
+- Booking tổng tiền bằng 0 được xác nhận và phát vé ngay, phương thức `FREE`. Booking có IPN thành công sau khi đã trả vé về kho hoặc khi sự kiện không còn APPROVED chuyển `PAYMENT_REVIEW`, lưu payment thành công để đối soát; hồ sơ hoàn tiền được tạo để Admin xử lý trên dashboard (xem admin-finance-api.md).
 - Flyway V6 chỉ thêm hai cột payment và index, giữ nguyên bảng/dữ liệu và migration cũ. Chưa cấu hình VNPay thì tính năng khác vẫn khởi động, riêng tạo URL thanh toán trả `503`.
 
 Đăng ký merchant tại [VNPay Sandbox](https://sandbox.vnpayment.vn/devreg/), rồi cấu hình qua biến môi trường hoặc `application-local.properties` đã được Git bỏ qua:
@@ -161,7 +161,7 @@ app.vnpay.return-url=http://localhost:5173/customer/payment-result
 | `VNPAY_HASH_SECRET` | Trống; khóa Sandbox, chỉ lưu ở backend |
 | `VNPAY_PAYMENT_URL` | `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html` |
 | `VNPAY_RETURN_URL` | `http://localhost:5173/customer/payment-result` |
-| `BOOKING_HOLD_TTL` | `5m` trong application.properties; chấp nhận từ 1–30 phút, số giây nguyên |
+| `BOOKING_HOLD_TTL` | `5m` trong application.properties; chấp nhận từ 60–500 giây, số giây nguyên |
 | `BOOKING_IPN_GRACE_PERIOD` | `120s`; thời gian giữ thêm khi chờ IPN, 0–300 giây nguyên; `0s` tắt khoảng chờ |
 | `BOOKING_EXPIRY_ENABLED` | `true`; bật job giải phóng vé hết hạn |
 | `BOOKING_EXPIRY_DELAY` | `30s`; khoảng cách giữa các lần chạy job |

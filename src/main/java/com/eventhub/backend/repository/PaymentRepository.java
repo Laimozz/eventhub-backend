@@ -9,10 +9,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 public interface PaymentRepository extends JpaRepository<Payment, Integer> {
-<<<<<<< HEAD
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"booking", "booking.user"})
     org.springframework.data.domain.Page<Payment> findByBookingEventId(Integer eventId, org.springframework.data.domain.Pageable pageable);
-=======
     List<Payment> findByBookingIdOrderByIdDesc(Integer bookingId);
     Optional<Payment> findByTransactionId(String transactionId);
     Optional<Payment> findFirstByBookingIdAndStatusOrderByIdDesc(Integer bookingId, String status);
@@ -28,5 +26,4 @@ public interface PaymentRepository extends JpaRepository<Payment, Integer> {
         Integer getBookingId();
         Integer getEventId();
     }
->>>>>>> develop
 }
