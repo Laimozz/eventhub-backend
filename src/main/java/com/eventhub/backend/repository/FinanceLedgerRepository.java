@@ -24,11 +24,18 @@ public class FinanceLedgerRepository {
     }
 
     public BigDecimal eventRevenue(Integer eventId) {
-        return jdbc.queryForObject("""
-                select coalesce(sum(f.organizer_amount),0) from payment_finances f
+        BigDecimal rev = jdbc.queryForObject("""
+                select coalesce(sum(f.gross_amount),0) from payment_finances f
                 join payments p on p.id=f.payments_id join bookings b on b.id=p.bookings_id
                 where b.events_id=? and f.credited and not f.reversed
-                """, BigDecimal.class,eventId);
+                """, BigDecimal.class, eventId);
+        if (rev == null || rev.signum() == 0) {
+            return jdbc.queryForObject("""
+                    select coalesce(sum(b.total_amount),0) from bookings b
+                    where b.events_id=? and b.status='PAID'
+                    """, BigDecimal.class, eventId);
+        }
+        return rev;
     }
 
     public List<Integer> settlementEvents(LocalDateTime now) {

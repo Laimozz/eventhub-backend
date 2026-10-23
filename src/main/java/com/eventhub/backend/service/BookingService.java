@@ -42,11 +42,8 @@ public class BookingService {
     private final ApplicationProperties properties;
     private final Clock clock;
     private final NotificationService notifications;
-<<<<<<< HEAD
     private final FinanceLedgerService financeLedger;
-=======
     private final AiOutboxService aiOutbox;
->>>>>>> develop
 
     @Transactional(readOnly = true)
     public List<TicketTypeInfo> listTicketTypes(Integer userId, Integer eventId) {

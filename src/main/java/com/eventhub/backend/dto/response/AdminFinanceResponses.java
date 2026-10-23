@@ -35,4 +35,44 @@ public final class AdminFinanceResponses {
             String refundStatus, Integer retryCount, LocalDateTime refundedAt) {}
     public record RefundDetailResponse(Integer eventId, String eventName, String cancelReason,
             AdminResponses.PageResponse<RefundPaymentResponse> payments, boolean canRefund, String unavailableReason) {}
+
+    public record AdminMonthlyTrendResponse(
+            String monthKey,
+            String monthLabel,
+            long totalTransactions,
+            BigDecimal grossRevenue,
+            BigDecimal netRevenue,
+            String formattedGrossRevenue,
+            String formattedNetRevenue
+    ) {}
+
+    public record AdminStatusBreakdownResponse(
+            String status,
+            String statusLabel,
+            long totalEvents,
+            double percentage
+    ) {}
+
+    public record AdminCategoryRevenueResponse(
+            Integer categoryId,
+            String categoryName,
+            long totalEvents,
+            long totalOrders,
+            BigDecimal grossRevenue,
+            String formattedGrossRevenue
+    ) {}
+
+    public record RefundReconciliationResponse(
+            Integer eventId,
+            String eventName,
+            long totalPayments,
+            BigDecimal totalAmount,
+            String formattedTotalAmount,
+            long refundedCount,
+            BigDecimal refundedAmount,
+            String formattedRefundedAmount,
+            long pendingRefundCount,
+            long retryNeededCount
+    ) {}
 }
+

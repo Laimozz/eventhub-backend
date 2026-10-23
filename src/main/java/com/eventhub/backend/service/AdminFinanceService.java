@@ -7,6 +7,11 @@ import com.eventhub.backend.entity.Refund;
 import com.eventhub.backend.enums.EventStatus;
 import com.eventhub.backend.exception.AdminException;
 import com.eventhub.backend.repository.*;
+import java.math.BigDecimal;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -25,6 +30,41 @@ public class AdminFinanceService {
     private final RefundRepository refunds;
 
     public OverviewResponse overview() { return finance.overview(); }
+
+    public List<AdminMonthlyTrendResponse> monthlyStats(int months) {
+        var rows = finance.getMonthlyStats(months <= 0 ? 6 : months);
+        return rows.stream().map(r -> new AdminMonthlyTrendResponse(
+                r.monthKey(),
+                r.monthLabel(),
+                r.totalTransactions(),
+                r.grossRevenue(),
+                r.netRevenue(),
+                formatVnd(r.grossRevenue()),
+                formatVnd(r.netRevenue())
+        )).toList();
+    }
+
+    public List<AdminStatusBreakdownResponse> eventStatusBreakdown() {
+        var rows = finance.getEventStatusBreakdown();
+        return rows.stream().map(r -> new AdminStatusBreakdownResponse(
+                r.status(),
+                statusLabel(r.status()),
+                r.totalEvents(),
+                r.percentage()
+        )).toList();
+    }
+
+    public List<AdminCategoryRevenueResponse> categoryRevenue() {
+        var rows = finance.getCategoryStats();
+        return rows.stream().map(r -> new AdminCategoryRevenueResponse(
+                r.categoryId(),
+                r.categoryName(),
+                r.totalEvents(),
+                r.totalOrders(),
+                r.grossRevenue(),
+                formatVnd(r.grossRevenue())
+        )).toList();
+    }
 
     public PageResponse<CanceledEventResponse> canceledEvents(int page, int pageSize) {
         return PageResponse.from(events.findByStatus(EventStatus.CANCELED, AdminPagination.page(page, pageSize))
@@ -52,5 +92,47 @@ public class AdminFinanceService {
         });
         return new RefundDetailResponse(eventId, event.getName(), event.getCancelReason(), PageResponse.from(rows), true,
                 "Hoàn tiền chỉ bắt đầu sau khi Admin chọn hoàn hàng loạt hoặc xử lý từng giao dịch.");
+    }
+
+    public RefundReconciliationResponse getEventRefundReconciliation(Integer eventId) {
+        var row = finance.getEventRefundReconciliation(eventId);
+        if (row == null) {
+            return new RefundReconciliationResponse(eventId, "Không tìm thấy dữ liệu", 0, BigDecimal.ZERO, "0 đ", 0, BigDecimal.ZERO, "0 đ", 0, 0);
+        }
+        return new RefundReconciliationResponse(
+                row.eventId(),
+                row.eventName(),
+                row.totalPayments(),
+                row.totalAmount(),
+                formatVnd(row.totalAmount()),
+                row.refundedCount(),
+                row.refundedAmount(),
+                formatVnd(row.refundedAmount()),
+                row.pendingRefundCount(),
+                row.retryNeededCount()
+        );
+    }
+
+
+    private static String statusLabel(String status) {
+        if (status == null) return "Không xác định";
+        return switch (status.toUpperCase()) {
+            case "APPROVED" -> "Đã duyệt / Đang mở bán";
+            case "ONGOING" -> "Đang diễn ra";
+            case "COMPLETED" -> "Đã kết thúc";
+            case "PENDING_APPROVAL" -> "Chờ phê duyệt";
+            case "PENDING_CANCELLATION" -> "Chờ duyệt hủy";
+            case "CANCELED" -> "Đã hủy";
+            case "REJECTED" -> "Bị từ chối";
+            default -> status;
+        };
+    }
+
+    private static String formatVnd(BigDecimal amount) {
+        if (amount == null) return "0 đ";
+        DecimalFormatSymbols symbols = new DecimalFormatSymbols(new Locale("vi", "VN"));
+        symbols.setGroupingSeparator('.');
+        DecimalFormat formatter = new DecimalFormat("#,##0", symbols);
+        return formatter.format(amount) + " đ";
     }
 }
