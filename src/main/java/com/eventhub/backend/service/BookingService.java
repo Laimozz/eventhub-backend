@@ -42,7 +42,11 @@ public class BookingService {
     private final ApplicationProperties properties;
     private final Clock clock;
     private final NotificationService notifications;
+<<<<<<< HEAD
     private final FinanceLedgerService financeLedger;
+=======
+    private final AiOutboxService aiOutbox;
+>>>>>>> develop
 
     @Transactional(readOnly = true)
     public List<TicketTypeInfo> listTicketTypes(Integer userId, Integer eventId) {
@@ -286,6 +290,7 @@ public class BookingService {
         notifications.create(booking.getEvent().getOrganizer(), "Có booking được xác nhận",
                 "Booking #" + booking.getId() + " cho sự kiện \"" + booking.getEvent().getName()
                         + "\" đã được xác nhận.", "BOOKING_CONFIRMED");
+        aiOutbox.logBookingInteraction(booking.getUser().getId(), booking.getEvent().getId());
     }
 
     @Transactional

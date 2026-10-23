@@ -28,6 +28,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final EventImageService eventImageService;
+    private final AiOutboxService aiOutbox;
 
     @Transactional(readOnly = true)
     public UserDetailDto getUserDetail(Integer userId) {
@@ -69,14 +70,30 @@ public class UserService {
                 ? request.gender().trim()
                 : existingUser.getGender();
 
+        String cityToUpdate = request.city() != null ? request.city().trim() : existingUser.getCity();
+        String categoriesToUpdate = request.preferredCategories() != null ? request.preferredCategories().trim() : existingUser.getPreferredCategories();
+
         userRepository.updateUserDetailNative(
                 userId,
                 request.fullName().trim(),
                 phone,
                 normalizedEmail,
                 request.dateOfBirth(),
-                genderToUpdate
+                genderToUpdate,
+                cityToUpdate,
+                categoriesToUpdate
         );
+
+        // Kiểm tra thay đổi thực tế: Chỉ ghi outbox khi có sự thay đổi về Địa lý (City), Sở thích (Categories), hoặc Nhân khẩu học (DOB, Gender)
+        // Nếu người dùng chỉ đổi Họ tên, Số điện thoại, Email thì giữ nguyên 100% vector hiện tại (No-op đối với AI)
+        boolean cityChanged = !java.util.Objects.equals(cityToUpdate, existingUser.getCity());
+        boolean categoriesChanged = !java.util.Objects.equals(categoriesToUpdate, existingUser.getPreferredCategories());
+        boolean demographicsChanged = !java.util.Objects.equals(genderToUpdate, existingUser.getGender())
+                || !java.util.Objects.equals(request.dateOfBirth(), existingUser.getDateOfBirth());
+
+        if (cityChanged || categoriesChanged || demographicsChanged) {
+            aiOutbox.logUserOutbox(userId, "UPDATE_USER");
+        }
 
         User updatedUser = userRepository.findUserByIdNative(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Người dùng không tồn tại"));

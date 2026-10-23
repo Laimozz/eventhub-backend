@@ -73,6 +73,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login",
                                 "/api/auth/refresh", "/api/auth/logout").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/public/events/**", "/api/categories").permitAll()
+                        // .requestMatchers(HttpMethod.POST, "/api/public/events/interactions").permitAll() // Tạm thời comment khi hệ thống AI đang bảo trì
                         .requestMatchers(HttpMethod.GET, "/api/payments/vnpay/ipn", "/api/payments/vnpay/return").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/events").hasRole("ORGANIZER")
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
