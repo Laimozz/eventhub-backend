@@ -372,7 +372,7 @@ Backend lấy Organizer từ phiên đăng nhập, tự gán `status = PENDING_A
 
 Sự kiện chờ duyệt được lưu trong DB để chức năng Admin truy vấn sau. Sau khi lưu dữ liệu sự kiện, backend tìm Admin ACTIVE và tạo một bản ghi `notifications` trong cùng transaction: `users_id` là ID của Admin, `title = Có sự kiện mới chờ duyệt`, `type = EVENT_PENDING_APPROVAL`, `is_read = false`, nội dung chứa tên sự kiện. Tên dài được rút gọn trong thông báo để giữ nội dung trong giới hạn 255 ký tự của DB. Thông báo chỉ để hiển thị. Nếu chưa có Admin ACTIVE, sự kiện vẫn được tạo; nếu lưu thông báo thất bại, toàn bộ transaction rollback. Với giả định hệ thống có một Admin, truy vấn lấy một Admin ACTIVE theo ID tăng dần.
 
-API Organizer gửi yêu cầu hủy được mô tả ở mục 10. API Admin duyệt/từ chối và cập nhật trạng thái vé được mô tả ở mục 11; Organizer đọc thông báo tại mục 12. Chuyển trạng thái sự kiện theo thời gian, Admin đọc thông báo, đánh dấu đã đọc và nghiệp vụ bán vé thuộc các tính năng tương ứng.
+API Organizer hủy sự kiện được mô tả ở mục 10. API Admin duyệt/từ chối hồ sơ sự kiện và cập nhật trạng thái loại vé được mô tả ở mục 11; thông báo tại mục 12. Chuyển trạng thái sự kiện theo thời gian và trạng thái bán vé public được mô tả ở mục 13–14.
 
 | HTTP status | Trường hợp |
 | --- | --- |
@@ -435,7 +435,7 @@ Query danh sách: `page` bắt đầu từ 0 (mặc định 0), `size` từ 1–
 
 ### Hủy sự kiện (UC23)
 
-POST `/api/events/{eventId}/cancel`, JSON `{"reason":"Lý do hủy"}`. Lý do bắt buộc, trim, tối đa 255 ký tự. Chủ Organizer chỉ hủy PENDING_APPROVAL/APPROVED/REJECTED trước startTime; đúng/sau giờ bắt đầu bị chặn. Transaction khóa sự kiện và kho vé, lưu CANCELED/canceledAt, vô hiệu vé VALID, ngừng bán và giải phóng booking đang giữ. Tạo thông báo cho Admin, Organizer và khách đã thanh toán; tạo hồ sơ WAITING cho payment SUCCESS có số tiền dương. Endpoint không gọi VNPAY; Admin kích hoạt hoàn hàng loạt/cá nhân theo [API tài chính](admin-finance-api.md).
+POST `/api/events/{eventId}/cancel`, JSON `{"reason":"Lý do hủy"}`. Lý do bắt buộc, trim, tối đa 255 ký tự. Chủ Organizer chỉ hủy PENDING_APPROVAL/APPROVED/REJECTED trước startTime; đúng/sau giờ bắt đầu bị chặn. Transaction khóa sự kiện và kho vé, lưu CANCELED/canceledAt, chuyển vé VALID sang CANCELED, loại vé sang INACTIVE, giải phóng booking PENDING và đánh dấu payment đang chờ thành EXPIRED. Tạo thông báo EVENT_CANCELED cho Admin, Organizer và khách đã thanh toán. Endpoint không tạo hồ sơ hoàn tiền và không gọi VNPAY; luồng hoàn/đối soát được xử lý riêng.
 
 Gửi lại hoặc trạng thái không hợp lệ trả 409. Không xóa lịch sử booking/payment; hồ sơ PENDING_CANCELLATION cũ giữ nguyên để đối soát riêng.
 
@@ -1151,10 +1151,10 @@ Mọi PATCH cần `X-CSRF-Protection: 1`. Kết nối SSE khác origin cần `wi
 
 Thông báo phát sinh từ các nghiệp vụ hiện có:
 
-- Admin ACTIVE nhận sự kiện mới, cập nhật chờ duyệt và yêu cầu hủy.
+- Admin ACTIVE nhận sự kiện mới, cập nhật chờ duyệt và thông báo sự kiện đã hủy.
 - Organizer nhận kết quả xét duyệt và booking đã xác nhận.
 - Customer nhận thông báo khi vé được phát hành thành công (vé miễn phí hoặc IPN VNPay hợp lệ).
-- Customer có booking PAID nhận cập nhật, yêu cầu hủy và kết quả xét duyệt của sự kiện liên quan. Yêu cầu hủy được mô tả là đang chờ xét duyệt, chưa phải sự kiện đã hủy.
+- Organizer và Customer có booking PAID nhận thông báo EVENT_CANCELED khi sự kiện đã được hủy; nội dung xác nhận đã hủy và lý do, không mô tả là đang chờ xét duyệt.
 
 STAFF tạm thời không nhận thông báo mới và không được truy cập các REST API/SSE thông báo (`403 FORBIDDEN`).
 
@@ -1172,11 +1172,15 @@ Các lỗi ngoài dự kiến có thể trả `500`; xem quy ước lỗi ở m�
 
 ## 13. Danh sách, tìm kiếm và lọc sự kiện public (UC06–08)
 
-GET `/api/public/events` không cần đăng nhập. Query: page=0, size=9, search chuỗi tìm tên, categoryId, city, fromDate/toDate (datetime ISO); các bộ lọc tùy chọn. Chỉ trả sự kiện công khai APPROVED/ONGOING. Response `content`, `page`, `size`, `totalElements`, `totalPages`; mỗi phần tử gồm id, name, thumbnailImageUrl, startTime, endTime, city, startingPrice. Không có kết quả trả content rỗng.
+GET `/api/public/events` không cần đăng nhập. Query: page=0, size=9, search chuỗi tìm tên, categoryId, city, fromDate/toDate (datetime ISO); các bộ lọc tùy chọn. Chỉ trả sự kiện công khai APPROVED/ONGOING có endTime > thời gian UTC hiện tại. Response `content`, `page`, `size`, `totalElements`, `totalPages`; mỗi phần tử gồm id, name, thumbnailImageUrl, startTime, endTime, city, startingPrice, status, salesStatus. Không có kết quả trả content rỗng. Thứ tự startTime giảm dần, ID tăng dần khi trùng giờ để phân trang ổn định.
 
 ## 14. Chi tiết sự kiện public (UC09)
 
-GET `/api/public/events/{eventId}` không cần đăng nhập; sự kiện không tồn tại/không công khai trả 404. Response gồm id, name, description, thumbnailImageUrl, bannerImageUrl, imageZoneUrl, startTime, endTime, organizerName, categoryName, venue (city, address), startingPrice, suggestedEvents (cùng cấu trúc thẻ danh sách).
+GET `/api/public/events/{eventId}` không cần đăng nhập; sự kiện không tồn tại/không công khai trả 404. Response gồm id, name, description, thumbnailImageUrl, bannerImageUrl, imageZoneUrl, startTime, endTime, organizerName, categoryName, venue (city, address), startingPrice, suggestedEvents (cùng cấu trúc thẻ danh sách), status, salesStatus, ticketTypes. Chi tiết vẫn cho đọc sự kiện COMPLETED; suggestedEvents loại sự kiện đã hết giờ.
+
+Mỗi ticketTypes gồm id, name, description, price, remainingQuantity, saleStartTime, saleEndTime và salesStatus. Trạng thái bán: NOT_ON_SALE (chưa đến giờ bán), ON_SALE (đang trong giờ bán và còn vé), SOLD_OUT (đang trong giờ bán nhưng hết vé), SALES_ENDED (đã đóng bán hoặc sự kiện đã bắt đầu), UNAVAILABLE (tạm ngừng bán). Trạng thái chung ưu tiên đợt đang bán, hết vé trong đợt hiện tại, đợt sắp mở, rồi đã đóng bán. Khi sự kiện bắt đầu thì không cho đặt vé mới.
+
+Job lifecycle mặc định mỗi 30 giây chuyển APPROVED → ONGOING khi đến startTime, APPROVED/ONGOING → COMPLETED khi đến endTime. API public tính status theo thời gian hiện tại ngay cả khi job chưa cập nhật DB. Cấu hình app.events.lifecycle-enabled=false để tắt job, app.events.lifecycle-delay để đổi chu kỳ.
 
 ## 15. Danh mục public
 

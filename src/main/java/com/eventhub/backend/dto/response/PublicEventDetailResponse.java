@@ -1,5 +1,7 @@
 package com.eventhub.backend.dto.response;
 
+import com.eventhub.backend.enums.EventStatus;
+import com.eventhub.backend.enums.TicketSalesStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -17,7 +19,10 @@ public record PublicEventDetailResponse(
         String categoryName,
         Venue venue,
         BigDecimal startingPrice,
-        List<PublicEventSummaryResponse> suggestedEvents
+        List<PublicEventSummaryResponse> suggestedEvents,
+        EventStatus status,
+        TicketSalesStatus salesStatus,
+        List<PublicTicketTypeResponse> ticketTypes
 ) {
     public record Venue(
             String city,

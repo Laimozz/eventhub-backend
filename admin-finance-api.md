@@ -61,7 +61,7 @@ Lỗi ghi dữ liệu hoặc notification rollback toàn bộ quyết định/s�
 
 ## UC38 hoàn tiền và đối soát
 
-Organizer hủy trước startTime: chuyển CANCELED, ngừng bán, giải phóng giữ vé, vô hiệu vé VALID và tạo refund WAITING cho payment SUCCESS có số tiền dương. FREE không gọi ngân hàng. IPN thành công muộn/PAYMENT_REVIEW cũng tạo hồ sơ. Không gọi VNPAY trong thao tác hủy.
+Organizer hủy trước startTime: chuyển CANCELED, ngừng bán, giải phóng giữ vé và vô hiệu vé VALID. Thao tác hủy chưa tạo hồ sơ refund và không gọi VNPAY. Luồng hoàn tiền có thể tạo hồ sơ riêng khi Admin chủ động xếp hàng hoàn cho sự kiện; luồng IPN thành công muộn/PAYMENT_REVIEW vẫn giữ cơ chế đối soát hiện có. FREE không gọi ngân hàng.
 
 Các API dưới đây chỉ ADMIN ACTIVE được truy cập; POST/PUT cần `X-CSRF-Protection: 1`. ID trong nhóm `/refunds` là **paymentId**.
 
