@@ -80,6 +80,8 @@ class BookingIntegrationTests {
     @Autowired private com.eventhub.backend.service.FinanceLedgerService finance;
     @Autowired private com.eventhub.backend.service.RefundWorkflowService refundWorkflow;
     @Autowired private com.eventhub.backend.service.EventService eventService;
+    @Autowired private com.eventhub.backend.service.EventLifecycleService lifecycle;
+    @Autowired private com.eventhub.backend.repository.RefundWorkflowRepository refundRecords;
     @Autowired private BookingRepository bookings;
     @MockitoSpyBean private Clock clock;
     @Autowired private UserRepository users;
@@ -611,6 +613,128 @@ class BookingIntegrationTests {
     }
 
     @Test
+    void cancellationInvalidatesTicketsAndReleasesAllHoldsWithoutCreatingRefunds() throws Exception {
+        int paid = paidBooking(2);
+        int held = create(2).get("id").asInt();
+        pay(held);
+        assertInventory(1, 2);
+
+        eventService.cancelEvent(organizer.getId(), event.getId(), "Venue unavailable");
+
+        assertInventory(3, 0);
+        assertThat(jdbc.queryForObject("SELECT status FROM ticket_types WHERE id=?", String.class, type.getId())).isEqualTo("INACTIVE");
+        assertThat(jdbc.queryForObject("SELECT status FROM bookings WHERE id=?", String.class, held)).isEqualTo("EXPIRED");
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE bookings_id=?", String.class, held)).isEqualTo("EXPIRED");
+        assertThat(jdbc.queryForObject("SELECT status FROM bookings WHERE id=?", String.class, paid)).isEqualTo("PAID");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM tickets t JOIN booking_items i ON i.id=t.booking_items_id WHERE i.bookings_id=? AND t.status='CANCELED'", Integer.class, paid)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM refunds r JOIN payments p ON p.id=r.payments_id JOIN bookings b ON b.id=p.bookings_id WHERE b.events_id=?", Integer.class, event.getId())).isZero();
+        mvc.perform(get("/api/tickets").cookie(access)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].canCheckIn").value(false)).andExpect(jsonPath("$.items[0].qrToken").isEmpty());
+        createRequest(access, body(1)).andExpect(status().isConflict());
+        assertThatThrownBy(() -> eventService.cancelEvent(organizer.getId(), event.getId(), "Again"))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertInventory(3, 0);
+    }
+
+    @Test
+    void lifecycleTransitionsAtStartAndEndAndPublicReadsExcludeExpiredEventsBeforeWorkerRuns() throws Exception {
+        Event persisted = events.findById(event.getId()).orElseThrow();
+        LocalDateTime start = persisted.getStartTime();
+        doReturn(start.minusSeconds(1).toInstant(ZoneOffset.UTC)).when(clock).instant();
+        lifecycle.advanceEvent(event.getId());
+        assertThat(events.findById(event.getId()).orElseThrow().getStatus()).isEqualTo(EventStatus.APPROVED);
+
+        doReturn(start.toInstant(ZoneOffset.UTC)).when(clock).instant();
+        mvc.perform(get("/api/public/events/{id}", event.getId())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ONGOING")).andExpect(jsonPath("$.salesStatus").value("SALES_ENDED"));
+        new com.eventhub.backend.service.EventLifecycleScheduler(events, lifecycle, clock).advance();
+        assertThat(events.findById(event.getId()).orElseThrow().getStatus()).isEqualTo(EventStatus.ONGOING);
+        long version = events.findById(event.getId()).orElseThrow().getVersion();
+        lifecycle.advanceEvent(event.getId());
+        assertThat(events.findById(event.getId()).orElseThrow().getVersion()).isEqualTo(version);
+
+        doReturn(persisted.getEndTime().toInstant(ZoneOffset.UTC)).when(clock).instant();
+        mvc.perform(get("/api/public/events").param("categoryId", category.getId().toString()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(0));
+        mvc.perform(get("/api/public/events/{id}", event.getId())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED")).andExpect(jsonPath("$.salesStatus").value("SALES_ENDED"));
+        new com.eventhub.backend.service.EventLifecycleScheduler(events, lifecycle, clock).advance();
+        assertThat(events.findById(event.getId()).orElseThrow().getStatus()).isEqualTo(EventStatus.COMPLETED);
+    }
+
+    @Test
+    void lifecyclePreservesCanceledRejectedAndPendingEvents() {
+        doReturn(event.getEndTime().plusHours(1).toInstant(ZoneOffset.UTC)).when(clock).instant();
+        for (EventStatus protectedStatus : List.of(EventStatus.CANCELED, EventStatus.REJECTED, EventStatus.PENDING_APPROVAL, EventStatus.PENDING_CANCELLATION)) {
+            jdbc.update("UPDATE events SET status=? WHERE id=?", protectedStatus.name(), event.getId());
+            lifecycle.advanceEvent(event.getId());
+            assertThat(events.findById(event.getId()).orElseThrow().getStatus()).isEqualTo(protectedStatus);
+        }
+    }
+
+    @Test
+    void publicTicketStatusUsesSaleWindowsStockAndRealTicketTypes() throws Exception {
+        LocalDateTime current = now().withNano(0);
+        doReturn(current.toInstant(ZoneOffset.UTC)).when(clock).instant();
+        LocalDateTime saleStart = current.plusHours(1), saleEnd = current.plusHours(2);
+        jdbc.update("UPDATE ticket_types SET sale_start_time=?,sale_end_time=? WHERE id=?", saleStart, saleEnd, type.getId());
+        mvc.perform(get("/api/public/events/{id}", event.getId())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("APPROVED"))
+                .andExpect(jsonPath("$.salesStatus").value("NOT_ON_SALE"))
+                .andExpect(jsonPath("$.ticketTypes[0].id").value(type.getId()))
+                .andExpect(jsonPath("$.ticketTypes[0].name").value(type.getName()))
+                .andExpect(jsonPath("$.ticketTypes[0].salesStatus").value("NOT_ON_SALE"));
+        doReturn(saleStart.toInstant(ZoneOffset.UTC)).when(clock).instant();
+        mvc.perform(get("/api/public/events").param("categoryId", category.getId().toString()))
+                .andExpect(jsonPath("$.content[0].salesStatus").value("ON_SALE"));
+        jdbc.update("UPDATE ticket_types SET remaining_quantity=0 WHERE id=?", type.getId());
+        mvc.perform(get("/api/public/events/{id}", event.getId())).andExpect(jsonPath("$.salesStatus").value("SOLD_OUT"));
+        doReturn(saleEnd.toInstant(ZoneOffset.UTC)).when(clock).instant();
+        mvc.perform(get("/api/public/events/{id}", event.getId())).andExpect(jsonPath("$.salesStatus").value("SALES_ENDED"));
+    }
+
+    @Test
+    void timelyPaymentStillIssuesHeldTicketsWhenIpnArrivesAfterEventStarts() throws Exception {
+        LocalDateTime current = now().withNano(0);
+        LocalDateTime start = current.plusSeconds(90);
+        jdbc.update("UPDATE events SET start_time=?,end_time=? WHERE id=?", start, start.plusHours(2), event.getId());
+        jdbc.update("UPDATE ticket_types SET sale_end_time=? WHERE id=?", current.plusSeconds(60), type.getId());
+        int bookingId = create(1).get("id").asInt();
+        var data = callback(pay(bookingId), "00");
+        data.set("vnp_PayDate", formatVnpDate(current.plusSeconds(30)));
+        signed(data);
+        doReturn(start.toInstant(ZoneOffset.UTC)).when(clock).instant();
+        lifecycle.advanceEvent(event.getId());
+        assertThat(events.findById(event.getId()).orElseThrow().getStatus()).isEqualTo(EventStatus.ONGOING);
+        assertThat(service.processIpn(data).get("RspCode")).isEqualTo("00");
+        assertThat(jdbc.queryForObject("SELECT status FROM bookings WHERE id=?", String.class, bookingId)).isEqualTo("PAID");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM tickets t JOIN booking_items i ON i.id=t.booking_items_id WHERE i.bookings_id=?", Integer.class, bookingId)).isEqualTo(1);
+        assertInventory(4, 0);
+    }
+
+    @Test
+    void publicEventsPaginateWithFiltersAndSuggestionsExcludeExpiredEvents() throws Exception {
+        // All fixtures share a category; equal start times still have a deterministic ID order.
+        Event next = new Event();
+        next.setOrganizer(organizer); next.setCategory(category); next.setVenue(venue);
+        next.setName("Public pagination test"); next.setThumbnailImageUrl("https://example.invalid/test.png");
+        next.setBannerImageUrl("https://example.invalid/test.png"); next.setStatus(EventStatus.APPROVED);
+        next.setStartTime(event.getStartTime()); next.setEndTime(event.getEndTime()); events.saveAndFlush(next);
+        try {
+            mvc.perform(get("/api/public/events").param("categoryId", category.getId().toString()).param("size", "1"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.totalPages").value(2)).andExpect(jsonPath("$.content[0].id").value(event.getId()));
+            mvc.perform(get("/api/public/events").param("categoryId", category.getId().toString()).param("size", "1").param("page", "1"))
+                    .andExpect(jsonPath("$.content[0].id").value(next.getId()));
+            jdbc.update("UPDATE events SET start_time=?,end_time=? WHERE id=?", now().minusHours(2), now().minusHours(1), next.getId());
+            mvc.perform(get("/api/public/events/{id}", event.getId())).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.suggestedEvents[?(@.id == " + next.getId() + ")]").isEmpty());
+        } finally {
+            jdbc.update("DELETE FROM events WHERE id=?", next.getId());
+        }
+    }
+
+    @Test
     void manualRefundReversesOriginalFeeOnceAndProtectsAccountAndEvidence() throws Exception {
         int bookingId = paidBooking(2);
         int paymentId = paymentId(bookingId);
@@ -619,6 +743,8 @@ class BookingIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT platform_fee FROM payment_finances WHERE payments_id=?", BigDecimal.class, paymentId))
                 .isEqualByComparingTo("15000");
         eventService.cancelEvent(organizer.getId(), event.getId(), "Venue unavailable");
+        // Refund scenarios explicitly prepare their own records; cancellation no longer creates them.
+        refundRecords.seedEvent(event.getId());
         assertThat(jdbc.queryForObject("SELECT status FROM refunds WHERE payments_id=?", String.class, paymentId)).isEqualTo("WAITING");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM tickets t JOIN booking_items i ON i.id=t.booking_items_id WHERE i.bookings_id=? AND t.status='VALID'", Integer.class, bookingId)).isZero();
         var bank = new com.eventhub.backend.dto.request.RefundBankAccountRequest("TESTBANK", "12345678", "Test customer", true);
@@ -685,7 +811,7 @@ class BookingIntegrationTests {
     }
 
     @Test
-    void cancellationRacingSuccessfulIpnAlwaysCreatesOneRefundAndNoUsableTickets() throws Exception {
+    void cancellationRacingSuccessfulIpnLeavesNoUsableTicketsOrReservations() throws Exception {
         int bookingId=create(1).get("id").asInt();
         var data=callback(pay(bookingId),"00");
         var start=new CountDownLatch(1);
@@ -697,7 +823,10 @@ class BookingIntegrationTests {
             assertThat(ipn.get(15,TimeUnit.SECONDS)).isEqualTo("00");
         }
         int paymentId=paymentId(bookingId);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM refunds WHERE payments_id=?",Integer.class,paymentId)).isEqualTo(1);
+        String bookingStatus = jdbc.queryForObject("SELECT status FROM bookings WHERE id=?", String.class, bookingId);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM refunds WHERE payments_id=?",Integer.class,paymentId))
+                .isEqualTo("PAYMENT_REVIEW".equals(bookingStatus) ? 1 : 0);
+        assertThat(jdbc.queryForObject("SELECT reserved_quantity FROM ticket_types WHERE id=?", Integer.class, type.getId())).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM tickets t JOIN booking_items i ON i.id=t.booking_items_id WHERE i.bookings_id=? AND t.status='VALID'",Integer.class,bookingId)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM payment_finances WHERE payments_id=?",Integer.class,paymentId)).isEqualTo(1);
     }
@@ -707,6 +836,7 @@ class BookingIntegrationTests {
         int paymentId=paymentId(paidBooking(1));
         User admin=user(Role.ADMIN);
         eventService.cancelEvent(organizer.getId(),event.getId(),"Canceled");
+        refundRecords.seedEvent(event.getId());
         refundWorkflow.saveBank(paymentId,admin.getId(),new com.eventhub.backend.dto.request.RefundBankAccountRequest("TEST","12345678","Customer",true));
         var start=new CountDownLatch(1);
         try(var executor=Executors.newFixedThreadPool(2)) {

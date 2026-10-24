@@ -5,12 +5,15 @@ import com.eventhub.backend.dto.request.UpdateEventRequest;
 import com.eventhub.backend.dto.response.EventResponse;
 import com.eventhub.backend.dto.response.EventListResponse;
 import com.eventhub.backend.dto.response.CategoryResponse;
+import com.eventhub.backend.dto.response.PublicEventSummaryResponse;
+import com.eventhub.backend.dto.response.PublicTicketTypeResponse;
 import com.eventhub.backend.entity.Event;
 import com.eventhub.backend.entity.EventGuest;
 import com.eventhub.backend.entity.TicketType;
 import com.eventhub.backend.entity.Venue;
 import com.eventhub.backend.enums.EventStatus;
 import com.eventhub.backend.enums.Role;
+import com.eventhub.backend.enums.TicketSalesStatus;
 import com.eventhub.backend.repository.CategoryRepository;
 import com.eventhub.backend.repository.BookingItemRepository;
 import com.eventhub.backend.repository.EventGuestRepository;
@@ -55,7 +58,7 @@ public class EventService {
     private final EventImageService images;
     private final BookingItemRepository bookingItems;
     private final BookingService bookings;
-    private final com.eventhub.backend.repository.RefundWorkflowRepository refundWorkflow;
+    private final com.eventhub.backend.repository.TicketRepository issuedTickets;
     private final AiOutboxService aiOutbox;
 
     @Transactional(readOnly = true)
@@ -111,10 +114,12 @@ public class EventService {
         event.setCanceledAt(LocalDateTime.now(clock));
         var savedTickets = ticketTypes.findForUpdate(eventId);
         savedTickets.forEach(ticket -> ticket.setStatus("INACTIVE"));
-        notifyAdmin(event, "Có yêu cầu hủy sự kiện", "EVENT_PENDING_CANCELLATION", "\" vừa được gửi yêu cầu hủy.");
-        notifications.notifyEventParticipants(eventId, "Sự kiện có yêu cầu hủy",
-                "Sự kiện #" + eventId + " đang chờ xét duyệt yêu cầu hủy. Lý do: " + event.getCancelReason(),
-                "EVENT_PENDING_CANCELLATION");
+        bookings.cancelReservations(eventId);
+        issuedTickets.invalidateUnusedForEvent(eventId);
+        notifyAdmin(event, "Sự kiện đã hủy", "EVENT_CANCELED", "\" đã được hủy.");
+        String content = "Sự kiện #" + eventId + " đã được hủy. Lý do: " + event.getCancelReason();
+        notifications.create(event.getOrganizer(), "Sự kiện đã hủy", content, "EVENT_CANCELED");
+        notifications.notifyEventParticipants(eventId, "Sự kiện đã hủy", content, "EVENT_CANCELED");
         events.flush();
         return EventResponse.from(event, savedTickets, guests.findByEventIdOrderByIdAsc(eventId), LocalDateTime.now(clock));
     }
@@ -435,11 +440,13 @@ public class EventService {
         String pattern = search == null ? "%%" : "%" + search.strip().toLowerCase(java.util.Locale.ROOT)
                 .replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
         String lowerCity = (city == null || city.isBlank()) ? null : city.trim().toLowerCase(java.util.Locale.ROOT);
-        
+        var now = LocalDateTime.now(clock);
         List<EventStatus> statuses = List.of(EventStatus.APPROVED, EventStatus.ONGOING);
-        var pagedResult = events.findPublicEvents(categoryId, lowerCity, fromDate, toDate, pattern, statuses, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "startTime")));
+        var pagedResult = events.findPublicEvents(categoryId, lowerCity, fromDate, toDate, pattern, statuses, now,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "startTime").and(Sort.by("id"))));
+        var byEvent = publicTicketTypes(pagedResult.getContent());
         return new com.eventhub.backend.dto.response.PublicEventListResponse(
-                pagedResult.getContent(),
+                pagedResult.getContent().stream().map(event -> publicSummary(event, byEvent.getOrDefault(event.getId(), List.of()), now)).toList(),
                 pagedResult.getNumber(),
                 pagedResult.getSize(),
                 pagedResult.getTotalElements(),
@@ -456,10 +463,14 @@ public class EventService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Event not available");
         }
 
+        var now = LocalDateTime.now(clock);
         List<EventStatus> statuses = List.of(EventStatus.APPROVED, EventStatus.ONGOING);
-        List<com.eventhub.backend.dto.response.PublicEventSummaryResponse> suggested = events.findSuggestedEvents(eventId, statuses, PageRequest.of(0, 10));
-
-        java.math.BigDecimal minPrice = ticketTypes.findByEventIdOrderByIdAsc(eventId).stream()
+        var suggestions = events.findSuggestedEvents(eventId, statuses, now, PageRequest.of(0, 10));
+        var byEvent = publicTicketTypes(suggestions);
+        var suggested = suggestions.stream()
+                .map(item -> publicSummary(item, byEvent.getOrDefault(item.getId(), List.of()), now)).toList();
+        var types = ticketTypes.findByEventIdOrderByIdAsc(eventId);
+        java.math.BigDecimal minPrice = types.stream()
                 .map(TicketType::getPrice)
                 .min(java.util.Comparator.naturalOrder())
                 .orElse(null);
@@ -477,7 +488,43 @@ public class EventService {
                 event.getCategory().getName(),
                 new com.eventhub.backend.dto.response.PublicEventDetailResponse.Venue(event.getVenue().getCity(), event.getVenue().getAddress()),
                 minPrice,
-                suggested
+                suggested,
+                EventLifecycleService.statusAt(event, now),
+                salesStatus(event, types, now),
+                types.stream().map(type -> new PublicTicketTypeResponse(type.getId(), type.getName(), type.getDescription(),
+                        type.getPrice(), type.getRemainingQuantity(), type.getSaleStartTime(), type.getSaleEndTime(),
+                        ticketSalesStatus(event, type, now))).toList()
         );
+    }
+
+    private Map<Integer, List<TicketType>> publicTicketTypes(List<Event> publicEvents) {
+        if (publicEvents.isEmpty()) return Map.of();
+        return ticketTypes.findByEventIds(publicEvents.stream().map(Event::getId).toList()).stream()
+                .collect(java.util.stream.Collectors.groupingBy(type -> type.getEvent().getId()));
+    }
+
+    private PublicEventSummaryResponse publicSummary(Event event, List<TicketType> types, LocalDateTime now) {
+        var price = types.stream().map(TicketType::getPrice).min(java.util.Comparator.naturalOrder()).orElse(null);
+        return new PublicEventSummaryResponse(event.getId(), event.getName(), event.getThumbnailImageUrl(),
+                event.getStartTime(), event.getEndTime(), event.getVenue().getCity(), price,
+                EventLifecycleService.statusAt(event, now), salesStatus(event, types, now));
+    }
+
+    private TicketSalesStatus ticketSalesStatus(Event event, TicketType type, LocalDateTime now) {
+        if (!now.isBefore(event.getStartTime())) return TicketSalesStatus.SALES_ENDED;
+        if (event.getStatus() != EventStatus.APPROVED || !"ACTIVE".equals(type.getStatus())) return TicketSalesStatus.UNAVAILABLE;
+        if (now.isBefore(type.getSaleStartTime())) return TicketSalesStatus.NOT_ON_SALE;
+        if (!now.isBefore(type.getSaleEndTime())) return TicketSalesStatus.SALES_ENDED;
+        return type.getRemainingQuantity() > 0 ? TicketSalesStatus.ON_SALE : TicketSalesStatus.SOLD_OUT;
+    }
+
+    private TicketSalesStatus salesStatus(Event event, List<TicketType> types, LocalDateTime now) {
+        if (!now.isBefore(event.getStartTime())) return TicketSalesStatus.SALES_ENDED;
+        var states = types.stream().map(type -> ticketSalesStatus(event, type, now)).toList();
+        for (var state : List.of(TicketSalesStatus.ON_SALE, TicketSalesStatus.SOLD_OUT, TicketSalesStatus.NOT_ON_SALE,
+                TicketSalesStatus.SALES_ENDED)) {
+            if (states.contains(state)) return state;
+        }
+        return TicketSalesStatus.UNAVAILABLE;
     }
 }

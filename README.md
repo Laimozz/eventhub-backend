@@ -15,6 +15,13 @@ Backend của dự án EventHub, sử dụng Java 21, Spring Boot và Maven. REA
 
 Hiện tại dự án có entity/repository, migration Flyway và kiểm thử tích hợp PostgreSQL. API gồm xác thực bằng JWT qua HttpOnly Cookie; Organizer quản lý sự kiện; Admin quản lý người dùng/danh mục và xét duyệt UC31–36. Xem [tài liệu API](api-endpoints.md) và [API quản trị](api-endpoints.md#admin-api).
 
+### Trạng thái sự kiện và bán vé public
+
+- Job cập nhật mỗi 30 giây: `APPROVED` → `ONGOING` tại `startTime`, `APPROVED`/`ONGOING` → `COMPLETED` tại `endTime`, theo UTC. Dùng cùng khóa sự kiện với booking/hủy/xét duyệt; không đổi sự kiện chờ duyệt, bị từ chối hoặc đã hủy. Có thể cấu hình `app.events.lifecycle-enabled` và `app.events.lifecycle-delay` (mặc định `true`, `30s`).
+- Danh sách và gợi ý public chỉ trả sự kiện có `endTime` ở tương lai. Response tính trạng thái theo thời gian hiện tại ngay cả trước lượt chạy job; chi tiết vẫn đọc được sự kiện đã kết thúc.
+- API public trả thêm `status`, `salesStatus`; chi tiết trả các `ticketTypes` với giá, số còn lại, thời gian và trạng thái bán thực tế. Trạng thái bán gồm `NOT_ON_SALE`, `ON_SALE`, `SOLD_OUT`, `SALES_ENDED`, `UNAVAILABLE`.
+- Hủy sự kiện chuyển loại vé sang `INACTIVE`, vé chưa dùng sang `CANCELED`, giải phóng tất cả booking `PENDING` và đánh dấu các payment đang chờ thành `EXPIRED` trong cùng transaction. Lịch sử thanh toán được giữ. Thao tác hủy không tạo hồ sơ hoàn tiền; các luồng hoàn/đối soát được xử lý riêng.
+
 ### Tài chính Admin UC37–UC42
 
 Đã có API thống kê số lượng/số dư, đọc đối soát sự kiện CANCELED và danh sách/chi tiết/duyệt/từ chối yêu cầu rút tiền. Hợp đồng ở [admin-finance-api.md](admin-finance-api.md). Doanh thu/phí chụp theo payment; đã có hoàn tự động VNPAY, đối soát và hoàn thủ công với tài khoản/chứng từ riêng cho Admin. Organizer hủy ngay trước giờ bắt đầu, Admin chủ động xếp hàng hoàn. Merchant sandbox cần nghiệm thu quyền query/refund. UC41 ghi nhận chuyển khoản đã thực hiện bên ngoài. Các phụ thuộc và trạng thái triển khai được theo dõi tại `../plan.md`.

@@ -53,31 +53,35 @@ public interface EventRepository extends JpaRepository<Event, Integer> {
     long countByVenueId(Integer venueId);
 
     @Query("""
-            select new com.eventhub.backend.dto.response.PublicEventSummaryResponse(
-                e.id, e.name, e.thumbnailImageUrl, e.startTime, e.endTime, e.venue.city,
-                (select min(t.price) from TicketType t where t.event.id = e.id)
-            )
-            from Event e
+            select e.id from Event e
+            where (e.status = com.eventhub.backend.enums.EventStatus.APPROVED and e.startTime <= :now)
+               or (e.status = com.eventhub.backend.enums.EventStatus.ONGOING and e.endTime <= :now)
+            order by e.endTime, e.id
+            """)
+    List<Integer> findLifecycleDueIds(java.time.LocalDateTime now, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"venue", "category"})
+    @Query("""
+            select e from Event e
             where e.status in :statuses
+            and e.endTime > :now
             and (:categoryId is null or e.category.id = :categoryId)
             and (:city is null or lower(e.venue.city) = :city)
             and (cast(:fromDate as timestamp) is null or e.startTime >= :fromDate)
             and (cast(:toDate as timestamp) is null or e.startTime <= :toDate)
             and lower(e.name) like :search escape '!'
             """)
-    Page<com.eventhub.backend.dto.response.PublicEventSummaryResponse> findPublicEvents(
+    Page<Event> findPublicEvents(
             Integer categoryId, String city, java.time.LocalDateTime fromDate, java.time.LocalDateTime toDate,
-            String search, List<EventStatus> statuses, Pageable pageable);
+            String search, List<EventStatus> statuses, java.time.LocalDateTime now, Pageable pageable);
 
+    @EntityGraph(attributePaths = {"venue", "category"})
     @Query("""
-            select new com.eventhub.backend.dto.response.PublicEventSummaryResponse(
-                e.id, e.name, e.thumbnailImageUrl, e.startTime, e.endTime, e.venue.city,
-                (select min(t.price) from TicketType t where t.event.id = e.id)
-            )
-            from Event e
+            select e from Event e
             where e.status in :statuses
+            and e.endTime > :now
             and e.id != :eventId
             order by e.createdAt desc
             """)
-    List<com.eventhub.backend.dto.response.PublicEventSummaryResponse> findSuggestedEvents(Integer eventId, List<EventStatus> statuses, Pageable pageable);
+    List<Event> findSuggestedEvents(Integer eventId, List<EventStatus> statuses, java.time.LocalDateTime now, Pageable pageable);
 }

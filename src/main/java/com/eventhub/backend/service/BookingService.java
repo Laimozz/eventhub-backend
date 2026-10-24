@@ -207,7 +207,8 @@ public class BookingService {
             boolean held = "PENDING".equals(booking.getStatus());
             // Enforce the grace deadline even if the expiry job has not run yet.
             if (held && LocalDateTime.now(clock).isBefore(booking.getExpiredAt().plus(properties.getBooking().getIpnGracePeriod()))
-                    && !paidAt.isAfter(booking.getExpiredAt()) && event.getStatus() == EventStatus.APPROVED) {
+                    && !paidAt.isAfter(booking.getExpiredAt()) && event.getEndTime().isAfter(LocalDateTime.now(clock))
+                    && (event.getStatus() == EventStatus.APPROVED || event.getStatus() == EventStatus.ONGOING)) {
                 issueTickets(booking, bookingItems.findByBookingIdOrderByIdAsc(booking.getId()));
             } else {
                 // Record actual money received even if a late IPN arrives after seats were released.
@@ -297,6 +298,9 @@ public class BookingService {
         for (var booking : bookings.findByEventIdAndStatus(eventId, "PENDING")) {
             releaseReservation(booking, types);
             booking.setStatus("EXPIRED");
+            payments.findByBookingIdOrderByIdDesc(booking.getId()).stream()
+                    .filter(payment -> "PENDING".equals(payment.getStatus()))
+                    .forEach(payment -> payment.setStatus("EXPIRED"));
         }
         bookings.flush();
     }
