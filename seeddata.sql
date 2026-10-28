@@ -99,7 +99,13 @@ BEGIN
     ) images WHERE url IS NOT NULL AND length(url) BETWEEN 1 AND 255;
 
     IF coalesce(cardinality(all_images), 0) = 0 THEN
-        RAISE EXCEPTION 'No existing image URL found. Add an image to the database before seeding. No demo data was inserted.';
+        all_images := ARRAY[
+            'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800',
+            'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800',
+            'https://images.unsplash.com/photo-1511578314322-379afb476865?w=800',
+            'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800',
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400'
+        ];
     END IF;
 
     SELECT array_agg(DISTINCT thumbnail_image_url ORDER BY thumbnail_image_url)
@@ -217,10 +223,10 @@ BEGIN
                      + row_data.start_hour * INTERVAL '1 hour';
         IF row_data.status = 'ONGOING' THEN starts_at := seed_now - INTERVAL '1 hour'; END IF;
         ends_at := starts_at + row_data.duration_hours * INTERVAL '1 hour';
-        INSERT INTO events (organizer_id, reviewed_by, venues_id, categories_id, name, description,
+        INSERT INTO events (version, organizer_id, reviewed_by, venues_id, categories_id, name, description,
                             thumbnail_image_url, banner_image_url, image_zone_url, start_time, end_time,
                             status, cancel_reason, canceled_at, reject_reason, reviewed_at, created_at, updated_at)
-        VALUES (organizer_ids[row_data.organizer_no],
+        VALUES (0, organizer_ids[row_data.organizer_no],
                 CASE WHEN row_data.status = 'PENDING_APPROVAL' THEN NULL ELSE admin_id END,
                 venue_ids[row_data.venue_no], category_ids[row_data.category_no], row_data.name, row_data.description,
                 thumbnail_images[1 + (i - 1) % cardinality(thumbnail_images)],
@@ -412,8 +418,8 @@ BEGIN
     fee := round(unit_price * 0.05, 0);
     INSERT INTO payment_finances (payments_id, gross_amount, platform_fee, organizer_amount, credited, settled, reversed, created_at)
     VALUES (payment_id, unit_price, fee, unit_price - fee, FALSE, FALSE, FALSE, booked_at + INTERVAL '10 minutes');
-    INSERT INTO refunds (payments_id, refund_transaction_id, amount, status, created_at, updated_at)
-    VALUES (payment_id, 'refund-' || payment_id, unit_price, 'WAITING', booked_at + INTERVAL '10 minutes', booked_at + INTERVAL '10 minutes');
+    INSERT INTO refunds (payments_id, refund_transaction_id, amount, status, retry_count, created_at, updated_at)
+    VALUES (payment_id, 'refund-' || payment_id, unit_price, 'WAITING', 0, booked_at + INTERVAL '10 minutes', booked_at + INTERVAL '10 minutes');
 
     -- Inventory is derived from actual items, not independent hard-coded counters.
     -- Canceled tickets stay sold, matching EventService.cancelEvent (no resale).
@@ -426,10 +432,11 @@ BEGIN
 
     -- Wallet balances follow the exact same 5% fee and settlement flags as the app.
     FOR i IN 1..3 LOOP
-        INSERT INTO organizer_wallets (organizer_id, pending_balance, available_balance, created_at, updated_at)
+        INSERT INTO organizer_wallets (organizer_id, pending_balance, available_balance, total_withdrawn, withdrawal_pending_balance, created_at, updated_at)
         SELECT organizer_ids[i],
                coalesce(sum(f.organizer_amount) FILTER (WHERE f.credited AND NOT f.settled AND NOT f.reversed), 0),
                coalesce(sum(f.organizer_amount) FILTER (WHERE f.credited AND f.settled AND NOT f.reversed), 0),
+               0, 0,
                seed_now - INTERVAL '60 days', seed_now
         FROM payment_finances f JOIN payments p ON p.id = f.payments_id
         JOIN bookings b ON b.id = p.bookings_id JOIN events e ON e.id = b.events_id
