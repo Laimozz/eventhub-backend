@@ -4,6 +4,8 @@ import com.eventhub.backend.entity.Category;
 import com.eventhub.backend.entity.RefreshToken;
 import com.eventhub.backend.entity.User;
 import com.eventhub.backend.enums.Role;
+import com.eventhub.backend.enums.EventStatus;
+import com.eventhub.backend.exception.AdminException;
 import com.eventhub.backend.repository.CategoryRepository;
 import com.eventhub.backend.repository.EventGuestRepository;
 import com.eventhub.backend.repository.EventRepository;
@@ -13,6 +15,7 @@ import com.eventhub.backend.repository.UserRepository;
 import com.eventhub.backend.security.AuthCookies;
 import com.eventhub.backend.security.JwtService;
 import com.eventhub.backend.service.EventImageService;
+import com.eventhub.backend.service.AdminEventReviewService;
 import jakarta.servlet.http.Cookie;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
@@ -49,6 +52,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
@@ -77,6 +81,7 @@ class EventIntegrationTests {
     @Autowired private CategoryRepository categories;
     @Autowired private RefreshTokenRepository tokens;
     @Autowired private JwtService jwt;
+    @Autowired private AdminEventReviewService reviews;
     @MockitoSpyBean private EventGuestRepository guests;
     @MockitoSpyBean private NotificationRepository notifications;
     @MockitoSpyBean private EventImageService images;
@@ -523,12 +528,13 @@ class EventIntegrationTests {
         mvc.perform(get("/api/events/mine").cookie(access).param("status", "DRAFT")).andExpect(status().isBadRequest());
     }
 
-    @Test
-    void shouldHideOtherOrganizersEventsForEveryOperation() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"PENDING_APPROVAL", "REJECTED"})
+    void shouldHideOtherOrganizersEventsForEveryOperation(String eventStatus) throws Exception {
         int eventId = createEventId();
         var body = updateRequest(eventId);
         createAdmin("ACTIVE");
-        jdbc.update("UPDATE events SET organizer_id = ? WHERE id = ?", admin.getId(), eventId);
+        jdbc.update("UPDATE events SET organizer_id = ?, status = ? WHERE id = ?", admin.getId(), eventStatus, eventId);
         try {
             mvc.perform(get("/api/events/mine").cookie(access)).andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalElements").value(0));
@@ -540,6 +546,80 @@ class EventIntegrationTests {
         } finally {
             jdbc.update("UPDATE events SET organizer_id = ? WHERE id = ?", organizer.getId(), eventId);
         }
+    }
+
+    @Test
+    void shouldResubmitRejectedEventAndAllowAdminToReviewTheUpdatedRevision() throws Exception {
+        createAdmin("ACTIVE");
+        int eventId = createEventId();
+        var rejected = reviews.decide(admin.getId(), eventId, reviews.detail(eventId).version(), "Clarify the venue");
+        mvc.perform(get("/api/events/{eventId}", eventId).cookie(access)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"))
+                .andExpect(jsonPath("$.rejectReason").value("Clarify the venue"))
+                .andExpect(jsonPath("$.canEdit").value(true));
+        mvc.perform(get("/api/events/mine").cookie(access).param("status", "REJECTED"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].id").value(eventId))
+                .andExpect(jsonPath("$.content[0].canEdit").value(true));
+
+        var body = updateRequest(eventId);
+        int ticketId = ((Number) firstTicket(body).get("id")).intValue();
+        String banner = (String) body.get("bannerImageUrl");
+        body.put("name", "Resubmitted organizer event");
+        body.put("description", "Updated description for review");
+        venue(body).put("city", "Updated city");
+        firstTicket(body).put("price", 200000);
+        firstGuest(body).put("name", "Updated speaker");
+        org.mockito.Mockito.clearInvocations(images);
+
+        update(eventId, body, Map.of()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(eventId))
+                .andExpect(jsonPath("$.name").value("Resubmitted organizer event"))
+                .andExpect(jsonPath("$.description").value("Updated description for review"))
+                .andExpect(jsonPath("$.venue.city").value("Updated city"))
+                .andExpect(jsonPath("$.status").value("PENDING_APPROVAL"))
+                .andExpect(jsonPath("$.rejectReason").isEmpty())
+                .andExpect(jsonPath("$.bannerImageUrl").value(banner))
+                .andExpect(jsonPath("$.ticketTypes[0].id").value(ticketId))
+                .andExpect(jsonPath("$.ticketTypes[0].price").value(200000))
+                .andExpect(jsonPath("$.ticketTypes[0].status").value("INACTIVE"))
+                .andExpect(jsonPath("$.guests[0].name").value("Updated speaker"));
+        verify(images, never()).upload(any(), anyString());
+        assertThat(jdbc.queryForMap("SELECT reviewed_by, reviewed_at, reject_reason FROM events WHERE id = ?", eventId))
+                .containsEntry("reviewed_by", null).containsEntry("reviewed_at", null).containsEntry("reject_reason", null);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications WHERE users_id = ? AND type = 'EVENT_PENDING_APPROVAL'",
+                Integer.class, admin.getId())).isEqualTo(2);
+        assertThat(reviews.list(0, 50).items()).anyMatch(item -> item.id().equals(eventId));
+        assertThatThrownBy(() -> reviews.decide(admin.getId(), eventId, rejected.version(), null))
+                .isInstanceOf(AdminException.class).hasMessageContaining("thay đổi");
+        var detail = reviews.detail(eventId);
+        assertThat(detail.event().name()).isEqualTo("Resubmitted organizer event");
+        assertThat(detail.version()).isGreaterThan(rejected.version());
+        assertThat(reviews.decide(admin.getId(), eventId, detail.version(), null).status()).isEqualTo(EventStatus.APPROVED);
+        mvc.perform(get("/api/events/{eventId}", eventId).cookie(access)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("APPROVED"))
+                .andExpect(jsonPath("$.ticketTypes[0].status").value("ACTIVE"));
+    }
+
+    @Test
+    void shouldKeepRejectionDetailsWhenResubmissionIsInvalidOrEventHasAlreadyStarted() throws Exception {
+        createAdmin("ACTIVE");
+        int eventId = createEventId();
+        reviews.decide(admin.getId(), eventId, reviews.detail(eventId).version(), "Clarify the venue");
+        var body = updateRequest(eventId);
+        var originalReview = jdbc.queryForMap("SELECT reviewed_by, reviewed_at, reject_reason, version FROM events WHERE id = ?", eventId);
+        venue(body).put("capacity", 1);
+        update(eventId, body, Map.of()).andExpect(status().isBadRequest());
+        assertThat(jdbc.queryForMap("SELECT reviewed_by, reviewed_at, reject_reason, version FROM events WHERE id = ?", eventId))
+                .isEqualTo(originalReview);
+        body = updateRequest(eventId);
+        // A future start time in the request cannot bypass the stored event's edit deadline.
+        jdbc.update("UPDATE events SET start_time = ? WHERE id = ?", LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1), eventId);
+        mvc.perform(get("/api/events/{eventId}", eventId).cookie(access)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"))
+                .andExpect(jsonPath("$.canEdit").value(false));
+        update(eventId, body, Map.of()).andExpect(status().isConflict());
+        assertThat(jdbc.queryForMap("SELECT reviewed_by, reviewed_at, reject_reason, version FROM events WHERE id = ?", eventId))
+                .isEqualTo(originalReview);
     }
 
     @Test

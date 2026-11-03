@@ -129,7 +129,7 @@ public class EventService {
             Map<String, MultipartFile> files) {
         Event event = ownedForUpdate(organizerId, eventId);
         if (!EventResponse.canEdit(event, LocalDateTime.now(clock))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only upcoming events awaiting approval or approved can be edited");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only upcoming pending, approved or rejected events can be edited");
         }
         validateScheduleAndCapacity(request.toCreateRequest());
         var category = categories.findById(request.categoryId())
