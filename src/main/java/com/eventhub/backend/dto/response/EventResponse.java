@@ -32,7 +32,8 @@ public record EventResponse(
     }
 
     public static boolean canEdit(Event event, LocalDateTime now) {
-        return (event.getStatus() == EventStatus.PENDING_APPROVAL || event.getStatus() == EventStatus.APPROVED)
+        return (event.getStatus() == EventStatus.PENDING_APPROVAL || event.getStatus() == EventStatus.APPROVED
+                || event.getStatus() == EventStatus.REJECTED)
                 && event.getStartTime().isAfter(now);
     }
 

@@ -422,13 +422,13 @@ Các endpoint dưới đây chỉ dành cho ORGANIZER ACTIVE, lấy tài khoản
 
 Query danh sách: `page` bắt đầu từ 0 (mặc định 0), `size` từ 1–50 (mặc định 9), `search` tối đa 255 ký tự (không phân biệt hoa/thường; tìm chuỗi trong tên), `status` tùy chọn dùng đúng enum ở mục 7. Response gồm `content`, `page`, `size`, `totalElements`, `totalPages`, `statusCounts`. Mỗi phần tử `content` gồm `id`, `name`, `description`, `thumbnailImageUrl`, `categoryName`, `city`, `address`, `startTime`, `endTime`, `status`, `canEdit`, `canCancel`. `statusCounts` đếm toàn bộ sự kiện của tài khoản theo từng trạng thái, không phụ thuộc bộ lọc. Danh sách trống trả `content: []`, `totalElements: 0`, `totalPages: 0`.
 
-`EventResponse` dùng cho tạo/chi tiết/sửa/hủy trả thêm `categoryName`, `cancelReason`, `canceledAt`, `canEdit`, `canCancel`, `rejectReason`. FE dùng hai cờ quyền thao tác để hiển thị nút; BE luôn kiểm tra lại trạng thái và thời gian trong transaction. Số vé đã bán = `quantity - remainingQuantity - reservedQuantity`, không tính vé đang giữ chỗ vào vé đã bán. REJECTED không được sửa/gửi lại trong phạm vi hiện tại.
+`EventResponse` dùng cho tạo/chi tiết/sửa/hủy trả thêm `categoryName`, `cancelReason`, `canceledAt`, `canEdit`, `canCancel`, `rejectReason`. FE dùng hai cờ quyền thao tác để hiển thị nút; BE luôn kiểm tra lại trạng thái và thời gian trong transaction. Số vé đã bán = `quantity - remainingQuantity - reservedQuantity`, không tính vé đang giữ chỗ vào vé đã bán. REJECTED được sửa/gửi duyệt lại bởi Organizer sở hữu sự kiện trước giờ bắt đầu.
 
 ### Sửa và gửi duyệt lại (UC20)
 
 - Part `event` dùng các trường như request tạo ở mục 7. Mỗi vé/khách mời có thêm `id` khi sửa bản ghi hiện có; bỏ `id` hoặc gửi null khi thêm mới. ID phải thuộc chính sự kiện, không được trùng trong một mảng. Bản ghi cũ không còn trong mảng sẽ được xóa. Phải có ít nhất một loại vé; `guests` có thể trống/null/bỏ qua để xóa toàn bộ khách mời.
 - Ảnh hiện có được giữ khi không gửi file thay thế. Không nhận URL ảnh từ client để cập nhật. Vé mới bắt buộc có `ticketImage{index}`; ảnh khách mời mới tùy chọn. Chỉ số file luôn theo thứ tự mảng JSON sau chỉnh sửa. Ảnh bìa/thumbnail/vé đã lưu không được xóa, có thể thay bằng file mới. `removeImageZone: true` xóa sơ đồ; `guests[i].removeImage: true` xóa ảnh khách mời. Các cờ có thể bỏ qua/false để giữ ảnh; không vừa xóa vừa gửi file thay thế cùng một ảnh.
-- Chỉ sửa `PENDING_APPROVAL` hoặc `APPROVED` trước `startTime`. Validation thời gian, sức chứa, giá và ảnh giữ như tạo sự kiện. Sau sửa, trạng thái là `PENDING_APPROVAL`, xóa thông tin duyệt cũ, tất cả vé `INACTIVE`, tạo thông báo `EVENT_PENDING_APPROVAL` cho Admin ACTIVE.
+- Chỉ sửa `PENDING_APPROVAL`, `APPROVED` hoặc `REJECTED` trước `startTime` đang lưu trong DB; không thể gửi thời gian mới để bỏ qua giới hạn này. Validation thời gian, sức chứa, giá và ảnh giữ như tạo sự kiện. Sau sửa, trạng thái là `PENDING_APPROVAL`, xóa `reviewedBy`, `reviewedAt`, `rejectReason` cũ, tất cả vé `INACTIVE`, tạo thông báo `EVENT_PENDING_APPROVAL` cho Admin ACTIVE. Sự kiện bị từ chối dùng cùng endpoint để chỉnh sửa và gửi lại trong một transaction, giữ nguyên ID. Nếu validation/upload/lưu thất bại thì vẫn giữ trạng thái/lý do từ chối cũ.
 - Giữ ID, số vé đã bán và đang giữ chỗ của vé hiện có. Khi đổi tổng số lượng, `remainingQuantity` thay đổi theo chênh lệch; không được giảm tổng dưới số vé đã bán + giữ chỗ. Không xóa loại vé đã bán, giữ chỗ hoặc còn được `booking_items` tham chiếu. Giá trong booking cũ giữ theo `unit_price` đã lưu.
 - Khóa sự kiện và các loại vé khi sửa/hủy. Validation dữ liệu/ảnh hoàn tất trước upload. Upload hoặc lưu DB thất bại thì rollback toàn bộ hồ sơ và dọn ảnh mới đã thử upload như luồng tạo; không gửi file mới thì không cần gọi Cloudinary. Địa điểm dùng chung không bị sửa theo sự kiện này.
 - Thành công trả `200` và hồ sơ đã lưu. `400` khi dữ liệu, ID con hoặc file không hợp lệ; `409` khi trạng thái không cho sửa, số lượng vé hoặc liên kết booking không cho phép thay đổi. Các lỗi ảnh giữ HTTP status như mục 9.
@@ -1073,7 +1073,7 @@ JSON với `Content-Type: application/json` và `X-CSRF-Protection: 1`.
 }
 ```
 
-Chỉ xử lý `PENDING_APPROVAL` và version còn khớp. Chuyển sự kiện thành `REJECTED`, vé `INACTIVE`; lưu Admin từ principal, giờ UTC server và lý do; tạo thông báo cho Organizer. `GET /api/events/{eventId}` trả `rejectReason`; frontend hiển thị trạng thái/lý do. Chưa mở quyền sửa/gửi lại REJECTED. Hủy dialog không gọi API.
+Chỉ xử lý `PENDING_APPROVAL` và version còn khớp. Chuyển sự kiện thành `REJECTED`, vé `INACTIVE`; lưu Admin từ principal, giờ UTC server và lý do; tạo thông báo cho Organizer. `GET /api/events/{eventId}` trả `rejectReason`; frontend hiển thị trạng thái/lý do. Organizer có thể chỉnh sửa và gửi lại qua `PUT /api/events/{eventId}` trước giờ bắt đầu (mục 10); sự kiện quay lại danh sách chờ duyệt với version mới, quyết định trên version cũ trả `409`. Hủy dialog không gọi API.
 
 #### Mã lỗi
 
