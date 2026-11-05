@@ -27,8 +27,9 @@ public class PublicEventController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @RequestParam(defaultValue = "") String search,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "9") int size) {
-        return events.listPublicEvents(categoryId, city, fromDate, toDate, search, page, size);
+            @RequestParam(defaultValue = "9") int size,
+            @RequestParam(defaultValue = "newest") String sort) {
+        return events.listPublicEvents(categoryId, city, fromDate, toDate, search, page, size, sort);
     }
 
     @GetMapping("/{eventId:\\d+}")

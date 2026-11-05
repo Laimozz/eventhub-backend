@@ -434,6 +434,12 @@ public class EventService {
     @Transactional(readOnly = true)
     public com.eventhub.backend.dto.response.PublicEventListResponse listPublicEvents(
             Integer categoryId, String city, LocalDateTime fromDate, LocalDateTime toDate, String search, int page, int size) {
+        return listPublicEvents(categoryId, city, fromDate, toDate, search, page, size, "newest");
+    }
+
+    @Transactional(readOnly = true)
+    public com.eventhub.backend.dto.response.PublicEventListResponse listPublicEvents(
+            Integer categoryId, String city, LocalDateTime fromDate, LocalDateTime toDate, String search, int page, int size, String sort) {
         if (page < 0 || size < 1 || size > 50 || (search != null && search.length() > 255)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid pagination or search");
         }
@@ -442,8 +448,10 @@ public class EventService {
         String lowerCity = (city == null || city.isBlank()) ? null : city.trim().toLowerCase(java.util.Locale.ROOT);
         var now = LocalDateTime.now(clock);
         List<EventStatus> statuses = List.of(EventStatus.APPROVED, EventStatus.ONGOING);
+        boolean isOldest = "oldest".equalsIgnoreCase(sort) || "asc".equalsIgnoreCase(sort);
+        Sort.Direction direction = isOldest ? Sort.Direction.ASC : Sort.Direction.DESC;
         var pagedResult = events.findPublicEvents(categoryId, lowerCity, fromDate, toDate, pattern, statuses, now,
-                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "startTime").and(Sort.by("id"))));
+                PageRequest.of(page, size, Sort.by(direction, "startTime").and(Sort.by(direction, "id"))));
         var byEvent = publicTicketTypes(pagedResult.getContent());
         return new com.eventhub.backend.dto.response.PublicEventListResponse(
                 pagedResult.getContent().stream().map(event -> publicSummary(event, byEvent.getOrDefault(event.getId(), List.of()), now)).toList(),

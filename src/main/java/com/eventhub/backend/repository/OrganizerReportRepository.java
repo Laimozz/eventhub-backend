@@ -98,7 +98,7 @@ public class OrganizerReportRepository {
         List<Object> capParams = new ArrayList<>();
         capParams.add(organizerId);
         if (eventId != null) {
-            sql.append(" AND ev.id = ?");
+            sql.append(" AND ev.id = ?\n");
             capParams.add(eventId);
         }
         sql.append("""
@@ -114,13 +114,13 @@ public class OrganizerReportRepository {
         List<Object> checkinParams = new ArrayList<>();
         checkinParams.add(organizerId);
         if (eventId != null) {
-            sql.append(" AND ev2.id = ?");
+            sql.append(" AND ev2.id = ?\n");
             checkinParams.add(eventId);
         }
         appendDateFilterToSubquery(sql, checkinParams, "b2.created_at", timeRange, startDate, endDate);
 
         sql.append("""
-                    ), 0) AS total_checked_in,
+                    \n), 0) AS total_checked_in,
                     COALESCE((
                         SELECT SUM(r.amount)
                         FROM events ev3
@@ -132,13 +132,13 @@ public class OrganizerReportRepository {
         List<Object> refundParams = new ArrayList<>();
         refundParams.add(organizerId);
         if (eventId != null) {
-            sql.append(" AND ev3.id = ?");
+            sql.append(" AND ev3.id = ?\n");
             refundParams.add(eventId);
         }
         appendDateFilterToSubquery(sql, refundParams, "b3.created_at", timeRange, startDate, endDate);
 
         sql.append("""
-                    ), 0) AS total_refund_amount
+                    \n), 0) AS total_refund_amount
                 FROM bookings b
                 JOIN events e ON b.events_id = e.id
                 LEFT JOIN (
@@ -157,7 +157,7 @@ public class OrganizerReportRepository {
         mainParams.add(organizerId);
 
         if (eventId != null) {
-            sql.append(" AND e.id = ?");
+            sql.append(" AND e.id = ?\n");
             mainParams.add(eventId);
         }
         appendDateFilterToSubquery(sql, mainParams, "b.created_at", timeRange, startDate, endDate);
@@ -203,13 +203,13 @@ public class OrganizerReportRepository {
         params.add(organizerId);
 
         if (eventId != null) {
-            sql.append(" AND e.id = ?");
+            sql.append(" AND e.id = ?\n");
             params.add(eventId);
         }
         appendDateFilterToSubquery(sql, params, "b.created_at", timeRange, startDate, endDate);
 
         sql.append("""
-                GROUP BY date_key, date_label
+                \nGROUP BY date_key, date_label
                 ORDER BY date_key ASC
                 """);
 
@@ -262,12 +262,12 @@ public class OrganizerReportRepository {
         params.add(organizerId);
 
         if (eventId != null) {
-            sql.append(" AND e.id = ?");
+            sql.append(" AND e.id = ?\n");
             params.add(eventId);
         }
 
         sql.append("""
-                GROUP BY e.id, e.name, c.name, e.status, e.start_time, e.end_time, v.city, v.address, ci.checked_in_count
+                \nGROUP BY e.id, e.name, c.name, e.status, e.start_time, e.end_time, v.city, v.address, ci.checked_in_count
                 ORDER BY revenue DESC, sold_tickets DESC
                 """);
 
@@ -312,11 +312,11 @@ public class OrganizerReportRepository {
         params.add(organizerId);
 
         if (eventId != null) {
-            sql.append(" AND e.id = ?");
+            sql.append(" AND e.id = ?\n");
             params.add(eventId);
         }
 
-        sql.append(" ORDER BY revenue DESC, sold_quantity DESC");
+        sql.append("\nORDER BY revenue DESC, sold_quantity DESC\n");
 
         return jdbc.query(sql.toString(), (rs, rowNum) -> new TicketTypeRow(
                 rs.getInt("ticket_type_id"),
@@ -346,13 +346,13 @@ public class OrganizerReportRepository {
         params.add(organizerId);
 
         if (eventId != null) {
-            sql.append(" AND e.id = ?");
+            sql.append(" AND e.id = ?\n");
             params.add(eventId);
         }
         appendDateFilterToSubquery(sql, params, "b.created_at", timeRange, startDate, endDate);
 
         sql.append("""
-                GROUP BY b.status
+                \nGROUP BY b.status
                 ORDER BY order_count DESC
                 """);
 
@@ -386,7 +386,7 @@ public class OrganizerReportRepository {
         params.add(organizerId);
 
         if (eventId != null) {
-            sql.append(" AND e.id = ?");
+            sql.append(" AND e.id = ?\n");
             params.add(eventId);
         }
         if (timeRange != null || startDate != null || endDate != null) {
@@ -399,7 +399,7 @@ public class OrganizerReportRepository {
         }
 
         sql.append("""
-                GROUP BY c.id, c.name
+                \nGROUP BY c.id, c.name
                 ORDER BY revenue DESC, sold_tickets DESC
                 """);
 
@@ -430,27 +430,27 @@ public class OrganizerReportRepository {
 
     private void appendDateFilterToSubquery(StringBuilder sql, List<Object> params, String column, String timeRange, LocalDate startDate, LocalDate endDate) {
         if (startDate != null && endDate != null) {
-            sql.append(" AND ").append(column).append(" >= ? AND ").append(column).append(" < ?");
+            sql.append(" AND ").append(column).append(" >= ? AND ").append(column).append(" < ?\n");
             params.add(startDate.atStartOfDay());
             params.add(endDate.plusDays(1).atStartOfDay());
         } else if (startDate != null) {
-            sql.append(" AND ").append(column).append(" >= ?");
+            sql.append(" AND ").append(column).append(" >= ?\n");
             params.add(startDate.atStartOfDay());
         } else if (endDate != null) {
-            sql.append(" AND ").append(column).append(" < ?");
+            sql.append(" AND ").append(column).append(" < ?\n");
             params.add(endDate.plusDays(1).atStartOfDay());
         } else if (timeRange != null) {
             switch (timeRange.toLowerCase()) {
-                case "today" -> sql.append(" AND ").append(column).append(" >= DATE_TRUNC('day', CURRENT_DATE)");
-                case "7d" -> sql.append(" AND ").append(column).append(" >= CURRENT_DATE - INTERVAL '7 day'");
-                case "30d" -> sql.append(" AND ").append(column).append(" >= CURRENT_DATE - INTERVAL '30 day'");
-                case "this_month" -> sql.append(" AND ").append(column).append(" >= DATE_TRUNC('month', CURRENT_DATE)");
-                case "last_month" -> sql.append(" AND ").append(column).append(" >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND ").append(column).append(" < DATE_TRUNC('month', CURRENT_DATE)");
-                case "3m" -> sql.append(" AND ").append(column).append(" >= CURRENT_DATE - INTERVAL '3 month'");
-                case "6m" -> sql.append(" AND ").append(column).append(" >= CURRENT_DATE - INTERVAL '6 month'");
-                case "year" -> sql.append(" AND ").append(column).append(" >= DATE_TRUNC('year', CURRENT_DATE)");
+                case "today" -> sql.append(" AND ").append(column).append(" >= DATE_TRUNC('day', CURRENT_DATE)\n");
+                case "7d" -> sql.append(" AND ").append(column).append(" >= CURRENT_DATE - INTERVAL '7 day'\n");
+                case "30d" -> sql.append(" AND ").append(column).append(" >= CURRENT_DATE - INTERVAL '30 day'\n");
+                case "this_month" -> sql.append(" AND ").append(column).append(" >= DATE_TRUNC('month', CURRENT_DATE)\n");
+                case "last_month" -> sql.append(" AND ").append(column).append(" >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND ").append(column).append(" < DATE_TRUNC('month', CURRENT_DATE)\n");
+                case "3m" -> sql.append(" AND ").append(column).append(" >= CURRENT_DATE - INTERVAL '3 month'\n");
+                case "6m" -> sql.append(" AND ").append(column).append(" >= CURRENT_DATE - INTERVAL '6 month'\n");
+                case "year" -> sql.append(" AND ").append(column).append(" >= DATE_TRUNC('year', CURRENT_DATE)\n");
                 case "all" -> { /* no filter */ }
-                default -> sql.append(" AND ").append(column).append(" >= CURRENT_DATE - INTERVAL '30 day'");
+                default -> sql.append(" AND ").append(column).append(" >= CURRENT_DATE - INTERVAL '30 day'\n");
             }
         }
     }
