@@ -57,11 +57,11 @@ Webhook/retry chưa triển khai: thiếu URL nhận, xác thực, payload và o
 
 Lý do bắt buộc, trim, tối đa 255 ký tự. Khóa và kiểm tra như duyệt. Trừ withdrawalPendingBalance, cộng availableBalance, giữ totalWithdrawn; lưu REJECTED, lý do/người/thời gian xử lý và notification WITHDRAWAL_REJECTED. Response 200 là chi tiết cập nhật.
 
-Lỗi ghi dữ liệu hoặc notification rollback toàn bộ quyết định/số dư/payout. Request đã quyết định hoặc gửi lặp trả 409, không tạo thêm tác dụng phụ. Unique index V7 bảo vệ mã chuyển khoản không null trên payout cả khi cạnh tranh giữa hai request.
+Lỗi ghi dữ liệu hoặc notification rollback toàn bộ quyết định/số dư/payout. Request đã quyết định hoặc gửi lặp trả 409, không tạo thêm tác dụng phụ. Unique index V9 bảo vệ mã chuyển khoản không null trên payout cả khi cạnh tranh giữa hai request.
 
 ## UC38 hoàn tiền và đối soát
 
-Organizer hủy trước startTime: chuyển CANCELED, ngừng bán, giải phóng giữ vé và vô hiệu vé VALID. Thao tác hủy chưa tạo hồ sơ refund và không gọi VNPAY. Luồng hoàn tiền có thể tạo hồ sơ riêng khi Admin chủ động xếp hàng hoàn cho sự kiện; luồng IPN thành công muộn/PAYMENT_REVIEW vẫn giữ cơ chế đối soát hiện có. FREE không gọi ngân hàng.
+Organizer hủy trước startTime: chuyển CANCELED, ngừng bán, giải phóng giữ vé và vô hiệu vé VALID. Thao tác hủy tạo hồ sơ WAITING cho payment SUCCESS có phí trong cùng transaction, chưa gọi VNPAY. Luồng hoàn tiền có thể tạo hồ sơ riêng khi Admin chủ động xếp hàng hoàn cho sự kiện; luồng IPN thành công muộn/PAYMENT_REVIEW vẫn giữ cơ chế đối soát hiện có. FREE không gọi ngân hàng.
 
 Các API dưới đây chỉ ADMIN ACTIVE được truy cập; POST/PUT cần `X-CSRF-Protection: 1`. ID trong nhóm `/refunds` là **paymentId**.
 
@@ -85,7 +85,7 @@ Body tài khoản:
 {"bankCode":"VCB","accountNumber":"0123456789","accountHolderName":"NGUYEN VAN A","originalAccountVerified":true}
 ```
 
-Tài khoản lưu ở `refund_bank_accounts`, khóa chính payment_id, kèm verified_by/verified_at. Không dùng tài khoản rút tiền Organizer, không giả định mã ngân hàng VNPAY là số tài khoản. Chỉ Admin nhập/đọc sau khi xác minh với người mua. WAITING/FAILED mới được sửa tài khoản. Chứng từ PDF/PNG/JPEG tối đa 5 MB lưu BYTEA riêng, kiểm tra loại và magic bytes; không dùng URL công khai. Mã chuyển khoản hoàn thủ công là duy nhất trong refund_evidence.
+Tài khoản lưu ở `refund_bank_accounts`, khóa chính payment_id, kèm provided_by/provided_at và verified_by/verified_at (NULL khi mới khai báo). Không dùng tài khoản rút tiền Organizer, không giả định mã ngân hàng VNPAY là số tài khoản. Customer có thể khai báo tài khoản khi bắt đầu thanh toán; đó chưa phải tài khoản đã xác minh. Admin đọc/kiểm tra với người mua trước khi xác minh hoặc sửa. Thông tin checkout khóa theo payment sau lần tạo liên kết đầu tiên; retry không ghi đè. WAITING/FAILED mới được sửa tài khoản. Chứng từ PDF/PNG/JPEG tối đa 5 MB lưu trong cột evidence_content BYTEA của refunds, kiểm tra loại và magic bytes; không dùng URL công khai. Mã chuyển khoản hoàn thủ công là duy nhất trong refunds.manual_transaction_code.
 
 Luồng tự động: WAITING → QUEUED → PROCESSING → COMPLETED / FAILED / RECONCILIATION. Timeout, chữ ký sai, kết quả chưa chắc chắn hoặc tiến trình gián đoạn không được coi là thất bại cuối; không tự gửi lại refund hoặc mở chuyển khoản thủ công. Worker khôi phục PROCESSING quá 10 phút sang RECONCILIATION. Chỉ phản hồi đã xác minh hoàn toàn bộ thành công mới hoàn tất; query giao dịch thanh toán gốc không chứng minh hoàn thành refund.
 
@@ -95,7 +95,7 @@ Hoàn tất đảo đúng phí/số tiền Organizer đã chụp theo payment, g
 
 ## Nguồn tiền, worker và cấu hình
 
-Payment thành công được chụp gross/phí 5%/phần Organizer vào payment_finances duy nhất theo payment. PAID cộng pending một lần; PAYMENT_REVIEW chưa cộng ví. Worker chỉ chuyển pending sang available sau endTime, sự kiện APPROVED/ONGOING/COMPLETED, đã cấp đủ vé VALID/USED, không có refund và chưa giải ngân/đảo tiền. GET ví không tạo ví hoặc suy ra số dư bằng 0 từ số vé hiện tại.
+Payment thành công được chụp gross/phí 5%/phần Organizer trên các cột gross_amount/platform_fee/organizer_amount/finance_* của payments. PAID cộng pending một lần; PAYMENT_REVIEW chưa cộng ví. Worker chỉ chuyển pending sang available sau endTime, sự kiện APPROVED/ONGOING/COMPLETED, đã cấp đủ vé VALID/USED, không có refund và chưa giải ngân/đảo tiền. GET ví không tạo ví hoặc suy ra số dư bằng 0 từ số vé hiện tại.
 
 - Giữ vé mặc định 5 phút; grace nhận IPN 120 giây. Cấu hình hold hợp lệ 60–500 giây.
 - `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET` dùng cùng merchant thanh toán; cấu hình `VNPAY_API_URL` và `VNPAY_API_IP_ADDRESS` cho query/refund.
@@ -126,8 +126,40 @@ Lỗi 500 ngoài dự kiến theo cơ chế chung hiện có. Không đổi hand
 
 ## Migration và kiểm thử
 
-V6 giữ migration booking; V7 thêm `uk_payout_transactions_transfer_reference`; V8 thêm payment_finances, refund_attempts, refund_bank_accounts, refund_evidence và trạng thái bổ sung trên refunds. Nếu dữ liệu cũ có mã trùng, dừng để đối soát; không xóa/gộp tự động. Không sửa V1–V5, không chạy migration vào DB nghiệp vụ để test.
+V6 giữ migration booking; V7/V8 thuộc AI/profile; V9 thêm `uk_payout_transactions_transfer_reference`. V10 chỉ tạo một bảng mới `refund_bank_accounts`, thêm snapshot tài chính vào payments và workflow/lịch sử JSONB/chứng từ vào refunds. Không tạo payment_finances, refund_attempts hay refund_evidence. Nếu dữ liệu cũ có mã trùng, dừng để đối soát; không xóa/gộp tự động. Không sửa V1–V5, không chạy migration vào DB nghiệp vụ để test.
 
-`AdminFinanceIntegrationTests` kiểm tra trên PostgreSQL test riêng: phân quyền, list/detail, wallet math, duplicate decision, concurrency cùng request/cùng ví, unique transfer reference, rollback notification, canceled event/partial refund read-only. `DatabaseIntegrationTests` kiểm tra nâng V1 lên V8. Frontend test giả lập API nằm ở `tests/admin-finance.spec.ts`; production gọi API thật.
+`AdminFinanceIntegrationTests` kiểm tra trên PostgreSQL test riêng: phân quyền, list/detail, wallet math, duplicate decision, concurrency cùng request/cùng ví, unique transfer reference, rollback notification, canceled event/partial refund read-only. `DatabaseIntegrationTests` kiểm tra nâng V1 lên V10. Frontend test giả lập API nằm ở `tests/admin-finance.spec.ts`; production gọi API thật.
 
 Kết quả 22/10/2026: backend clean verify 355 test đạt trên PostgreSQL tạm; thêm 2 ca cạnh tranh chạy trong BookingIntegrationTests (38/38 đạt). API multipart chứng từ cũng được kiểm thử qua MockMvc. Frontend build/lint đạt (còn cảnh báo cũ), các suite finance/Admin/booking/notification/auth/event/refresh được chạy và xử lý các lỗi phát hiện. Xem mục 13 của ../plan.md để biết từng lượt và giới hạn nghiệm thu sandbox.
+
+### Chẩn đoán refund/query ngày 01/11/2026
+
+- Claim chụp dữ liệu Payment trong transaction; HTTP VNPAY chỉ nhận snapshot, không đọc entity detached và không giữ khóa DB trong lúc gọi provider.
+- Detail `/api/admin/refunds/{paymentId}` trả thêm `lastError` (nullable). Mỗi attempt có thêm `diagnosticCode`, `diagnosticStage`, `diagnosticMessage`, `httpStatus` (nullable; lịch sử cũ vẫn đọc được).
+- Mã chẩn đoán: `PROVIDER_INPUT_INVALID` (PREPARE), `PROVIDER_CONNECTION_ERROR`/`PROVIDER_HTTP_ERROR` (HTTP), `PROVIDER_RESPONSE_UNREADABLE` (RESPONSE), `PROVIDER_EMPTY_RESPONSE`/`PROVIDER_UNVERIFIED_RESPONSE` (VERIFY), `PROVIDER_INTERNAL_ERROR` (INTERNAL). Không trả raw exception/payload/secret.
+- `/reconcile` trả hồ sơ sau xử lý; HTTP 200 không đồng nghĩa đã xác nhận hoàn tiền. Client đọc status/lastError/attempts. Kết quả chưa rõ vẫn RECONCILIATION, không tự retry refund hoặc mở khóa thủ công.
+- Không thêm migration. Chẩn đoán nằm trong attempt_history JSONB và last_error hiện có. Ngày giao dịch VNPAY vẫn là createdAt ban đầu, quy đổi GMT+7.
+
+Chẩn đoán xác minh chi tiết (thay mã gộp `PROVIDER_UNVERIFIED_RESPONSE` cho attempt mới):
+
+| Mã | Ý nghĩa |
+| --- | --- |
+| `PROVIDER_SIGNATURE_MISSING` | Không có chữ ký vnp_SecureHash. |
+| `PROVIDER_SIGNATURE_INVALID_FORMAT` | Chữ ký không phải chuỗi hex 128 ký tự. |
+| `PROVIDER_SIGNATURE_MISMATCH` | Chữ ký khác kết quả backend tính; chưa kết luận riêng HashSecret sai. |
+| `PROVIDER_FIELD_MISSING` | Thiếu trường cần xác minh; thông báo nêu tên trường. |
+| `PROVIDER_MERCHANT_MISMATCH` | vnp_TmnCode không khớp. |
+| `PROVIDER_COMMAND_MISMATCH` | vnp_Command không khớp. |
+| `PROVIDER_REFERENCE_MISMATCH` | vnp_TxnRef không khớp. |
+| `PROVIDER_AMOUNT_MISMATCH` | vnp_Amount không khớp số tiền VND nhân 100. |
+
+Các kiểm tra trường chỉ thực hiện sau xác minh chữ ký. Thông báo có thể kèm vnp_ResponseCode dạng đúng hai chữ số; nếu chữ ký chưa hợp lệ thì ghi rõ “chưa xác minh”, chỉ dùng chẩn đoán, không dùng để hoàn tất/từ chối hoặc mở khóa khoản hoàn. Không lưu raw vnp_Message, secret, chữ ký hay giá trị giao dịch không khớp. Null ở trường tùy chọn được xử lý như chuỗi rỗng khi dựng chuỗi ký. Các attempt cũ giữ nguyên mã gộp; chỉ attempt mới có mã chi tiết.
+
+### Thu gọn lưu trữ ngày 26/10/2026
+
+- `POST /api/admin/refund-events/{eventId}/refunds/prepare` tạo hồ sơ WAITING còn thiếu, trả `{ "preparedCount": 0 }` khi không có hồ sơ mới; idempotent, ADMIN ACTIVE + CSRF, không yêu cầu cấu hình VNPAY và không gửi lệnh chuyển tiền.
+- `refunds.attempt_history` lưu lịch sử request/command/outcome/mã kết quả/thời gian; active_request_id ngăn phản hồi cũ ghi đè lượt đối soát mới. API detail vẫn trả attempts (100 mục gần nhất). Chứng từ chỉ tải qua endpoint riêng, không đưa BYTEA vào danh sách/chi tiết. account_history lưu dấu vết thay đổi tài khoản trong DB, không trả ra API.
+- Detail trả thêm requestedBy. Khi MANUAL_PENDING chỉ Admin này được xác nhận hoặc giữ lại luồng; Admin khác nhận 409 REFUND_RESERVED_BY_OTHER_ADMIN. Không tự mở khóa hoặc bàn giao khi chưa đối soát chuyển khoản ngoài hệ thống.
+- Tài khoản mới khai báo chưa có verifiedBy/verifiedAt không được hoàn thủ công. Refund amount khác toàn bộ payment bị chặn với REFUND_AMOUNT_MISMATCH; payment cũ thiếu snapshot trả FINANCE_REQUIRES_RECONCILIATION thay vì tự cộng/đảo ví.
+- Doanh thu Organizer dùng organizer_amount chưa đảo; 0 sau hoàn toàn bộ vẫn là 0, không fallback sang booking PAID. Biểu đồ phí tháng dùng phí từng payment chưa đảo, không lấy tổng tiền nhân lại 5%.
+- V7/V8 tài chính đã áp dụng được giữ nguyên; V9/V10 dành cho AI. Migration chuyển tiếp V11 nâng cấp cấu trúc tài chính và chuyển dữ liệu hiện có, không cần reset database. Không repair checksum để bỏ qua khác biệt schema.

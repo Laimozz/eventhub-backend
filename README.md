@@ -1,5 +1,9 @@
 # EventHub Backend
 
+Sửa refund/query 01/11/2026: provider nhận snapshot Payment được chụp trong transaction để tránh lỗi lazy session; lỗi được ghi bằng mã chẩn đoán an toàn trong attempt_history/last_error. Xem [API tài chính](admin-finance-api.md). Không đổi schema hoặc tự mở khóa hồ sơ RECONCILIATION.
+
+Chẩn đoán xác minh đã tách riêng lỗi chữ ký/thiếu trường/sai merchant, command, mã giao dịch và số tiền. Restart backend để áp dụng; truy vấn lại tạo attempt mới có mã cụ thể, lịch sử cũ không thay đổi.
+
 Backend của dự án EventHub, sử dụng Java 21, Spring Boot và Maven. README này hướng dẫn cách chạy dự án, tổ chức mã nguồn và phối hợp bằng Git.
 
 ## 1. Công nghệ và trạng thái hiện tại
@@ -20,7 +24,7 @@ Hiện tại dự án có entity/repository, migration Flyway và kiểm thử t
 - Job cập nhật mỗi 30 giây: `APPROVED` → `ONGOING` tại `startTime`, `APPROVED`/`ONGOING` → `COMPLETED` tại `endTime`, theo UTC. Dùng cùng khóa sự kiện với booking/hủy/xét duyệt; không đổi sự kiện chờ duyệt, bị từ chối hoặc đã hủy. Có thể cấu hình `app.events.lifecycle-enabled` và `app.events.lifecycle-delay` (mặc định `true`, `30s`).
 - Danh sách và gợi ý public chỉ trả sự kiện có `endTime` ở tương lai. Response tính trạng thái theo thời gian hiện tại ngay cả trước lượt chạy job; chi tiết vẫn đọc được sự kiện đã kết thúc.
 - API public trả thêm `status`, `salesStatus`; chi tiết trả các `ticketTypes` với giá, số còn lại, thời gian và trạng thái bán thực tế. Trạng thái bán gồm `NOT_ON_SALE`, `ON_SALE`, `SOLD_OUT`, `SALES_ENDED`, `UNAVAILABLE`.
-- Hủy sự kiện chuyển loại vé sang `INACTIVE`, vé chưa dùng sang `CANCELED`, giải phóng tất cả booking `PENDING` và đánh dấu các payment đang chờ thành `EXPIRED` trong cùng transaction. Lịch sử thanh toán được giữ. Thao tác hủy không tạo hồ sơ hoàn tiền; các luồng hoàn/đối soát được xử lý riêng.
+- Hủy sự kiện chuyển loại vé sang `INACTIVE`, vé chưa dùng sang `CANCELED`, giải phóng tất cả booking `PENDING` và đánh dấu các payment đang chờ thành `EXPIRED` trong cùng transaction. Lịch sử thanh toán được giữ. Thao tác hủy tạo hồ sơ WAITING cho payment SUCCESS có phí; Admin chủ động bắt đầu hoàn/đối soát, chưa gọi ngân hàng tại lúc hủy.
 
 ### Tài chính Admin UC37–UC42
 
@@ -487,3 +491,9 @@ Tránh message như `update`, `fix bug`, `done`, `abc` vì không giúp người
 - [ ] Commit message rõ ràng, bằng tiếng Anh.
 - [ ] PR có base là `develop`, mô tả thay đổi và kết quả kiểm tra thực tế.
 - [ ] Đã chọn reviewer; chỉ dọn nhánh sau khi PR được merge.
+
+### Lưu trữ hoàn tiền V10 (26/10/2026)
+
+V10 chỉ tạo `refund_bank_accounts` theo payment_id. Snapshot phí/nguồn tiền nằm trên payments; lịch sử attempt JSONB, mã chuyển khoản và chứng từ nằm trên refunds có sẵn. Checkout cho phép khai báo tài khoản mua vé (không bắt buộc), khóa sau khi tạo liên kết và chưa coi là đã xác minh. Admin xác minh trước hoàn thủ công; một Admin phụ trách mỗi khoản đang chuyển thủ công. Xem admin-finance-api.md để biết API chuẩn bị hồ sơ và mã lỗi.
+
+Lịch sử migration giữ nguyên V7 (withdrawal transfer reference) và V8 (finance refund workflow) đã chạy trên database. Hai migration AI nằm ở V9/V10. V11 chuyển snapshot tài chính, lịch sử thử hoàn tiền và bằng chứng sang payments/refunds, đồng thời nâng cấp refund_bank_accounts trước khi bỏ các bảng cũ. Không reset database hoặc repair checksum để bỏ qua khác biệt schema. Database đã chạy một chuỗi phiên bản khác cần đối chiếu lịch sử trước khi nâng cấp.

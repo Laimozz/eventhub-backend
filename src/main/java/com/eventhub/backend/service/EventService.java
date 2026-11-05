@@ -58,6 +58,7 @@ public class EventService {
     private final EventImageService images;
     private final BookingItemRepository bookingItems;
     private final BookingService bookings;
+    private final com.eventhub.backend.repository.RefundWorkflowRepository refundWorkflow;
     private final com.eventhub.backend.repository.TicketRepository issuedTickets;
     private final AiOutboxService aiOutbox;
 
@@ -116,6 +117,7 @@ public class EventService {
         savedTickets.forEach(ticket -> ticket.setStatus("INACTIVE"));
         bookings.cancelReservations(eventId);
         issuedTickets.invalidateUnusedForEvent(eventId);
+        refundWorkflow.seedEvent(eventId);
         notifyAdmin(event, "Sự kiện đã hủy", "EVENT_CANCELED", "\" đã được hủy.");
         String content = "Sự kiện #" + eventId + " đã được hủy. Lý do: " + event.getCancelReason();
         notifications.create(event.getOrganizer(), "Sự kiện đã hủy", content, "EVENT_CANCELED");

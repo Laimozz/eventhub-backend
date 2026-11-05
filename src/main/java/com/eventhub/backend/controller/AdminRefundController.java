@@ -35,6 +35,10 @@ public class AdminRefundController {
     public java.util.Map<String,Integer> batch(@PathVariable Integer eventId,@AuthenticationPrincipal UserResponse admin) {
         return java.util.Map.of("queuedCount",refunds.queueEvent(eventId,admin.id()));
     }
+    @PostMapping("/refund-events/{eventId}/refunds/prepare")
+    public java.util.Map<String,Integer> prepare(@PathVariable Integer eventId) {
+        return java.util.Map.of("preparedCount",refunds.prepareEvent(eventId));
+    }
     @PostMapping("/refunds/{paymentId}/reconcile")
     public RefundWorkflowService.Detail reconcile(@PathVariable Integer paymentId) {
         provider.execute(paymentId,true); return refunds.detail(paymentId);

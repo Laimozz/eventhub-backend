@@ -48,7 +48,7 @@ public class AdminFinanceRepository {
                        coalesce(sum(total_withdrawn), 0) as total_withdrawn,
                        (select coalesce(sum(amount),0) from payments where status='SUCCESS') as gross_revenue,
                        (select coalesce(sum(amount),0) from refunds where status='COMPLETED') as total_refunded,
-                       (select coalesce(sum(platform_fee),0) from payment_finances where not reversed) as net_revenue
+                       (select coalesce(sum(platform_fee),0) from payments where not finance_reversed) as net_revenue
                 from organizer_wallets
                 """, (rs, row) -> new OverviewResponse(rs.getLong("total_events"), rs.getLong("total_users"),
                         rs.getLong("tickets_sold"), rs.getBigDecimal("pending_balance"), rs.getBigDecimal("available_balance"),
@@ -63,7 +63,7 @@ public class AdminFinanceRepository {
                     'T' || TO_CHAR(paid_at, 'MM/YY') AS month_label,
                     COUNT(id) AS total_transactions,
                     COALESCE(SUM(amount), 0) AS gross_revenue,
-                    COALESCE(SUM(amount) * 0.05, 0) AS net_revenue
+                    COALESCE(SUM(CASE WHEN NOT finance_reversed THEN platform_fee ELSE 0 END), 0) AS net_revenue
                 FROM payments
                 WHERE status = 'SUCCESS'
                   AND paid_at >= CURRENT_DATE - (? || ' month')::INTERVAL

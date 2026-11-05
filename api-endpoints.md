@@ -1849,4 +1849,8 @@ Các endpoint dành riêng cho nhân viên soát vé (role `STAFF`) phục vụ 
 
 ## 24. Tích hợp tài chính UC37–42
 
-Hợp đồng hiện hành: [admin-finance-api.md](admin-finance-api.md). Doanh thu Organizer dùng snapshot payment_finances sau phí 5%, không nhân giá vé hiện tại. PAID cộng pending; worker chỉ giải ngân sau khi sự kiện kết thúc và đủ điều kiện. Hoàn thành refund đảo snapshot; PAYMENT_REVIEW không ghi có ví. Các mô tả ví ở mục 18 phải được hiểu theo quy tắc nguồn tiền này. Giữ vé mặc định 5 phút, grace IPN 120 giây; PAY/IPN vẫn là nguồn xác nhận thanh toán, return URL không cấp vé.
+Hợp đồng hiện hành: [admin-finance-api.md](admin-finance-api.md). Doanh thu Organizer dùng snapshot trên payments sau phí 5%, không nhân giá vé hiện tại. PAID cộng pending; worker chỉ giải ngân sau khi sự kiện kết thúc và đủ điều kiện. Hoàn thành refund đảo snapshot; PAYMENT_REVIEW không ghi có ví. Các mô tả ví ở mục 18 phải được hiểu theo quy tắc nguồn tiền này. Giữ vé mặc định 5 phút, grace IPN 120 giây; PAY/IPN vẫn là nguồn xác nhận thanh toán, return URL không cấp vé.
+
+### Bổ sung tài khoản mua vé (26/10/2026)
+
+`POST /api/bookings/{bookingId}/payments/vnpay` giữ body rỗng tương thích; có thể gửi body `{"bankAccount":{"bankCode":"TEST","accountNumber":"00123456","accountHolderName":"TEST CUSTOMER"}}`. Đây là dữ liệu khai báo, không có quyền xác minh từ Customer. API kiểm tra chủ booking và CSRF, lưu cùng transaction tạo payment. Lần gọi lại dùng cùng payment đang PENDING: cùng tài khoản hoặc không gửi body được phép; đổi/bổ sung tài khoản sau khi đã tạo liên kết trả 409. FREE không cần tài khoản. Không đưa dữ liệu tài khoản vào URL VNPAY hoặc response booking công khai.

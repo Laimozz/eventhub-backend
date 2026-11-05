@@ -82,6 +82,8 @@ class BookingIntegrationTests {
     @Autowired private com.eventhub.backend.service.EventService eventService;
     @Autowired private com.eventhub.backend.service.EventLifecycleService lifecycle;
     @Autowired private com.eventhub.backend.repository.RefundWorkflowRepository refundRecords;
+    @Autowired private FinanceLedgerRepository financeRecords;
+    @Autowired private com.eventhub.backend.config.ApplicationProperties applicationProperties;
     @Autowired private BookingRepository bookings;
     @MockitoSpyBean private Clock clock;
     @Autowired private UserRepository users;
@@ -135,12 +137,8 @@ class BookingIntegrationTests {
     void cleanup() {
         if (event != null && event.getId() != null) {
             Integer id = event.getId();
-            for (String table : List.of("refund_attempts", "refund_evidence")) {
-                jdbc.update("DELETE FROM " + table + " WHERE refunds_id IN (SELECT r.id FROM refunds r JOIN payments p ON p.id=r.payments_id JOIN bookings b ON b.id=p.bookings_id WHERE b.events_id=?)", id);
-            }
             jdbc.update("DELETE FROM refund_bank_accounts WHERE payment_id IN (SELECT p.id FROM payments p JOIN bookings b ON b.id=p.bookings_id WHERE b.events_id=?)", id);
             jdbc.update("DELETE FROM refunds WHERE payments_id IN (SELECT p.id FROM payments p JOIN bookings b ON b.id=p.bookings_id WHERE b.events_id=?)", id);
-            jdbc.update("DELETE FROM payment_finances WHERE payments_id IN (SELECT p.id FROM payments p JOIN bookings b ON b.id=p.bookings_id WHERE b.events_id=?)", id);
             jdbc.update("DELETE FROM tickets WHERE booking_items_id IN (SELECT i.id FROM booking_items i JOIN bookings b ON b.id = i.bookings_id WHERE b.events_id = ?)", id);
             jdbc.update("DELETE FROM payments WHERE bookings_id IN (SELECT id FROM bookings WHERE events_id = ?)", id);
             jdbc.update("DELETE FROM booking_items WHERE bookings_id IN (SELECT id FROM bookings WHERE events_id = ?)", id);
@@ -613,7 +611,7 @@ class BookingIntegrationTests {
     }
 
     @Test
-    void cancellationInvalidatesTicketsAndReleasesAllHoldsWithoutCreatingRefunds() throws Exception {
+    void cancellationInvalidatesTicketsReleasesHoldsAndPreparesPaidRefunds() throws Exception {
         int paid = paidBooking(2);
         int held = create(2).get("id").asInt();
         pay(held);
@@ -627,7 +625,7 @@ class BookingIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE bookings_id=?", String.class, held)).isEqualTo("EXPIRED");
         assertThat(jdbc.queryForObject("SELECT status FROM bookings WHERE id=?", String.class, paid)).isEqualTo("PAID");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM tickets t JOIN booking_items i ON i.id=t.booking_items_id WHERE i.bookings_id=? AND t.status='CANCELED'", Integer.class, paid)).isEqualTo(2);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM refunds r JOIN payments p ON p.id=r.payments_id JOIN bookings b ON b.id=p.bookings_id WHERE b.events_id=?", Integer.class, event.getId())).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM refunds r JOIN payments p ON p.id=r.payments_id JOIN bookings b ON b.id=p.bookings_id WHERE b.events_id=? AND r.status='WAITING'", Integer.class, event.getId())).isEqualTo(1);
         mvc.perform(get("/api/tickets").cookie(access)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].canCheckIn").value(false)).andExpect(jsonPath("$.items[0].qrToken").isEmpty());
         createRequest(access, body(1)).andExpect(status().isConflict());
@@ -735,16 +733,98 @@ class BookingIntegrationTests {
     }
 
     @Test
+    void providerUsesSnapshotAfterClaimTransactionAndSendsOnlyOneRefund() throws Exception {
+        int paymentId = paymentId(paidBooking(1));
+        User admin = user(Role.ADMIN);
+        eventService.cancelEvent(organizer.getId(),event.getId(),"Provider boundary test");
+        refundWorkflow.queue(paymentId,admin.getId());
+        var builder = org.springframework.web.client.RestClient.builder();
+        var server = org.springframework.test.web.client.MockRestServiceServer.bindTo(builder).build();
+        var adapter = new com.eventhub.backend.service.VnPayService(applicationProperties,builder.build());
+        var runner = new com.eventhub.backend.service.RefundProviderService(refundWorkflow,adapter,clock);
+        String date = jdbc.queryForObject("select to_char(created_at + interval '7 hours','YYYYMMDDHH24MISS') from payments where id=?",String.class,paymentId);
+        for (String command : List.of("refund","querydr")) {
+            server.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(applicationProperties.getVnpay().getApiUrl()))
+                .andExpect(request -> {
+                    assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                    var body = ((org.springframework.mock.http.client.MockClientHttpRequest)request).getBodyAsString();
+                    assertThat(json.readTree(body).get("vnp_Command").asText()).isEqualTo(command);
+                    assertThat(json.readTree(body).get("vnp_TransactionDate").asText()).isEqualTo(date);
+                    if(command.equals("refund")) assertThat(json.readTree(body).get("vnp_Amount").asText()).isEqualTo("15000050");
+                })
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess(
+                    signedRefundResponse(paymentId,command,command.equals("refund")?"05":"00"),MediaType.APPLICATION_JSON));
+        }
+        runner.execute(paymentId,false);
+        assertThat(refundWorkflow.detail(paymentId).status()).isEqualTo("RECONCILIATION");
+        assertThat(jdbc.queryForObject("select finance_reversed from payments where id=?",Boolean.class,paymentId)).isFalse();
+        runner.execute(paymentId,true);
+        runner.execute(paymentId,false); // completed: must not send another request
+        server.verify();
+        assertThat(refundWorkflow.detail(paymentId).status()).isEqualTo("COMPLETED");
+        assertThat(refundWorkflow.detail(paymentId).lastError()).isNull();
+        assertThat(refundWorkflow.detail(paymentId).attempts()).hasSize(2);
+        assertThat(jdbc.queryForObject("select pending_balance from organizer_wallets where organizer_id=?",BigDecimal.class,organizer.getId())).isEqualByComparingTo("0");
+        assertThat(jdbc.queryForObject("select count(*) from notifications where users_id=? and type='REFUND_COMPLETED'",Integer.class,customer.getId())).isEqualTo(1);
+    }
+
+    private String signedRefundResponse(int paymentId,String command,String status) throws Exception {
+        var response = new java.util.LinkedHashMap<String,String>();
+        response.put("vnp_ResponseId",UUID.randomUUID().toString().replace("-",""));
+        response.put("vnp_Command",command); response.put("vnp_ResponseCode","00"); response.put("vnp_Message","OK");
+        response.put("vnp_TmnCode",applicationProperties.getVnpay().getTmnCode());
+        response.put("vnp_TxnRef",jdbc.queryForObject("select transaction_id from payments where id=?",String.class,paymentId));
+        response.put("vnp_Amount","15000050"); response.put("vnp_BankCode","TESTBANK");
+        response.put("vnp_PayDate","20261101150000"); response.put("vnp_TransactionNo","12345678");
+        response.put("vnp_TransactionType","02"); response.put("vnp_TransactionStatus",status); response.put("vnp_OrderInfo","Refund test");
+        String plain = String.join("|",response.values())+(command.equals("querydr")?"||":"");
+        Mac mac = Mac.getInstance("HmacSHA512");
+        mac.init(new SecretKeySpec(applicationProperties.getVnpay().getHashSecret().getBytes(StandardCharsets.UTF_8),"HmacSHA512"));
+        response.put("vnp_SecureHash",HexFormat.of().formatHex(mac.doFinal(plain.getBytes(StandardCharsets.UTF_8))));
+        return json.writeValueAsString(response);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings={"http","connection","json","signature"})
+    void providerFailuresPersistSafeDiagnosticsWithoutReversingOrRetrying(String scenario) throws Exception {
+        int paymentId = paymentId(paidBooking(1));
+        User admin = user(Role.ADMIN);
+        eventService.cancelEvent(organizer.getId(),event.getId(),"Provider failure test");
+        refundWorkflow.queue(paymentId,admin.getId());
+        var builder = org.springframework.web.client.RestClient.builder();
+        var server = org.springframework.test.web.client.MockRestServiceServer.bindTo(builder).build();
+        var expectation = server.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.anything());
+        String code;
+        switch(scenario) {
+            case "http" -> { expectation.andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withServerError().body("PRIVATE_PROVIDER_BODY")); code="PROVIDER_HTTP_ERROR"; }
+            case "connection" -> { expectation.andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withException(new java.net.SocketTimeoutException("PRIVATE_TIMEOUT"))); code="PROVIDER_CONNECTION_ERROR"; }
+            case "json" -> { expectation.andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess("not json",MediaType.APPLICATION_JSON)); code="PROVIDER_RESPONSE_UNREADABLE"; }
+            default -> { expectation.andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess("{}",MediaType.APPLICATION_JSON)); code="PROVIDER_SIGNATURE_MISSING"; }
+        }
+        var runner = new com.eventhub.backend.service.RefundProviderService(refundWorkflow,new com.eventhub.backend.service.VnPayService(applicationProperties,builder.build()),clock);
+        runner.execute(paymentId,false);
+        runner.execute(paymentId,false);
+        server.verify();
+        var detail = refundWorkflow.detail(paymentId);
+        assertThat(detail.status()).isEqualTo("RECONCILIATION");
+        assertThat(detail.attempts()).hasSize(1);
+        assertThat(detail.attempts().getFirst().diagnosticCode()).isEqualTo(code);
+        assertThat(detail.lastError()).isNotBlank().doesNotContain("PRIVATE");
+        if(scenario.equals("http")) assertThat(detail.attempts().getFirst().httpStatus()).isEqualTo(500);
+        assertThat(jdbc.queryForObject("select finance_reversed from payments where id=?",Boolean.class,paymentId)).isFalse();
+        assertThat(jdbc.queryForObject("select count(*) from notifications where users_id=? and type='REFUND_COMPLETED'",Integer.class,customer.getId())).isZero();
+    }
+
+    @Test
     void manualRefundReversesOriginalFeeOnceAndProtectsAccountAndEvidence() throws Exception {
         int bookingId = paidBooking(2);
         int paymentId = paymentId(bookingId);
         User admin = user(Role.ADMIN);
         var adminCookie = cookie(admin);
-        assertThat(jdbc.queryForObject("SELECT platform_fee FROM payment_finances WHERE payments_id=?", BigDecimal.class, paymentId))
+        assertThat(financeRecords.eventRevenue(event.getId())).isEqualByComparingTo("285001");
+        assertThat(jdbc.queryForObject("SELECT platform_fee FROM payments WHERE id=?", BigDecimal.class, paymentId))
                 .isEqualByComparingTo("15000");
         eventService.cancelEvent(organizer.getId(), event.getId(), "Venue unavailable");
-        // Refund scenarios explicitly prepare their own records; cancellation no longer creates them.
-        refundRecords.seedEvent(event.getId());
         assertThat(jdbc.queryForObject("SELECT status FROM refunds WHERE payments_id=?", String.class, paymentId)).isEqualTo("WAITING");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM tickets t JOIN booking_items i ON i.id=t.booking_items_id WHERE i.bookings_id=? AND t.status='VALID'", Integer.class, bookingId)).isZero();
         var bank = new com.eventhub.backend.dto.request.RefundBankAccountRequest("TESTBANK", "12345678", "Test customer", true);
@@ -760,7 +840,8 @@ class BookingIntegrationTests {
                 .param("transactionCode","TEST-"+paymentId).cookie(adminCookie).header("X-CSRF-Protection","1"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("COMPLETED"));
         refundWorkflow.confirmManual(paymentId,admin.getId(),"TEST-"+paymentId,"application/pdf",evidence);
-        assertThat(jdbc.queryForObject("SELECT reversed FROM payment_finances WHERE payments_id=?",Boolean.class,paymentId)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT finance_reversed FROM payments WHERE id=?",Boolean.class,paymentId)).isTrue();
+        assertThat(financeRecords.eventRevenue(event.getId())).isEqualByComparingTo("0");
         assertThat(jdbc.queryForObject("SELECT pending_balance FROM organizer_wallets WHERE organizer_id=?",BigDecimal.class,organizer.getId())).isEqualByComparingTo("0");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications WHERE users_id=? AND type='REFUND_COMPLETED'",Integer.class,customer.getId())).isEqualTo(1);
         mvc.perform(get("/api/admin/refunds/{paymentId}/evidence",paymentId).cookie(access)).andExpect(status().isForbidden());
@@ -782,14 +863,14 @@ class BookingIntegrationTests {
         var query = refundWorkflow.claim(paymentId,true);
         refundWorkflow.finish(query,new com.eventhub.backend.service.VnPayService.ApiResult(true,false,"00","00","54321"));
         assertThat(refundWorkflow.detail(paymentId).status()).isEqualTo("COMPLETED");
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM refund_attempts a JOIN refunds r ON r.id=a.refunds_id WHERE r.payments_id=? AND a.command='refund'",Integer.class,paymentId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM refunds r, jsonb_array_elements(r.attempt_history) a WHERE r.payments_id=? AND a->>'command'='refund'",Integer.class,paymentId)).isEqualTo(1);
     }
 
     @Test
     void settlesOnlyCompletedEventAndOnlyOnceUsingOriginalPaymentSnapshot() throws Exception {
         int paymentId = paymentId(paidBooking(2));
         finance.settleEvent(event.getId());
-        assertThat(jdbc.queryForObject("SELECT settled FROM payment_finances WHERE payments_id=?",Boolean.class,paymentId)).isFalse();
+        assertThat(jdbc.queryForObject("SELECT finance_settled FROM payments WHERE id=?",Boolean.class,paymentId)).isFalse();
         jdbc.update("UPDATE ticket_types SET price=1 WHERE id=?",type.getId());
         jdbc.update("UPDATE events SET start_time=?,end_time=?,status='COMPLETED' WHERE id=?",now().minusHours(2),now().minusHours(1),event.getId());
         finance.settleEvent(event.getId()); finance.settleEvent(event.getId());
@@ -811,6 +892,103 @@ class BookingIntegrationTests {
     }
 
     @Test
+    void purchaseAccountIsUnverifiedImmutableOnRetryAndRequiresOwner() throws Exception {
+        int bookingId=create(1).get("id").asInt();
+        String body="""
+                {"bankAccount":{"bankCode":"TEST","accountNumber":"00123456","accountHolderName":"Test customer"}}
+                """;
+        String path="/api/bookings/"+bookingId+"/payments/vnpay";
+        mvc.perform(post(path).cookie(cookie(other)).header("X-CSRF-Protection","1")
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isNotFound());
+        var response=mvc.perform(post(path).cookie(access).header("X-CSRF-Protection","1")
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk()).andReturn();
+        int id=json.readTree(response.getResponse().getContentAsString()).get("paymentId").asInt();
+        mvc.perform(post(path).cookie(access).header("X-CSRF-Protection","1")
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.paymentId").value(id));
+        mvc.perform(post(path).cookie(access).header("X-CSRF-Protection","1")
+                .contentType(MediaType.APPLICATION_JSON).content(body.replace("00123456","00999999")))
+                .andExpect(status().isConflict());
+        var account=refundRecords.bankAccount(id).orElseThrow();
+        assertThat(account.accountNumber()).isEqualTo("00123456");
+        assertThat(account.verifiedBy()).isNull();
+        assertThat(account.verifiedAt()).isNull();
+        var callback=callback(pay(bookingId),"00");
+        service.processIpn(callback);
+        eventService.cancelEvent(organizer.getId(),event.getId(),"Canceled");
+        User admin=user(Role.ADMIN);
+        assertThatThrownBy(() -> refundWorkflow.reserveManual(id,admin.getId()))
+                .isInstanceOf(com.eventhub.backend.exception.AdminException.class)
+                .hasMessageContaining("Chưa xác minh");
+    }
+
+    @Test
+    void preparesLegacyRefundWithoutGatewayAndReportsMissingSnapshot() throws Exception {
+        int id=paymentId(paidBooking(1));
+        jdbc.update("UPDATE events SET status='CANCELED' WHERE id=?",event.getId());
+        assertThat(refundWorkflow.prepareEvent(event.getId())).isEqualTo(1);
+        assertThat(refundWorkflow.prepareEvent(event.getId())).isZero();
+        jdbc.update("""
+                UPDATE payments SET gross_amount=NULL,platform_fee=NULL,organizer_amount=NULL,
+                    finance_recorded_at=NULL,finance_credited=false WHERE id=?
+                """,id);
+        User admin=user(Role.ADMIN);
+        assertThatThrownBy(() -> refundWorkflow.reserveManual(id,admin.getId()))
+                .isInstanceOf(com.eventhub.backend.exception.AdminException.class)
+                .hasMessageContaining("thiếu dữ liệu tài chính");
+    }
+
+    @Test
+    void lateAttemptCannotOverwriteNewQueryAndManualOwnerCannotBeStolen() throws Exception {
+        int id=paymentId(paidBooking(1));
+        User admin=user(Role.ADMIN);
+        User second=user(Role.ADMIN);
+        eventService.cancelEvent(organizer.getId(),event.getId(),"Canceled");
+        refundWorkflow.queue(id,admin.getId());
+        var first=refundWorkflow.claim(id,false);
+        refundWorkflow.finish(first,null);
+        var query=refundWorkflow.claim(id,true);
+        refundWorkflow.finish(first,new com.eventhub.backend.service.VnPayService.ApiResult(false,true,"00","09","123"));
+        assertThat(refundWorkflow.detail(id).status()).isEqualTo("PROCESSING");
+        refundWorkflow.finish(query,new com.eventhub.backend.service.VnPayService.ApiResult(false,true,"00","09","123"));
+        refundWorkflow.saveBank(id,admin.getId(),new com.eventhub.backend.dto.request.RefundBankAccountRequest("TEST","12345678","Customer",true));
+        refundWorkflow.reserveManual(id,admin.getId());
+        assertThatThrownBy(() -> refundWorkflow.reserveManual(id,second.getId()))
+                .isInstanceOf(com.eventhub.backend.exception.AdminException.class);
+        assertThatThrownBy(() -> refundWorkflow.confirmManual(id,second.getId(),"CODE","application/pdf","%PDF-1.7 proof".getBytes()))
+                .isInstanceOf(com.eventhub.backend.exception.AdminException.class);
+        assertThat(refundWorkflow.detail(id).requestedBy()).isEqualTo(admin.getId());
+    }
+
+    @Test
+    void rejectsPartialLegacyRefundBeforeSendingMoney() throws Exception {
+        int id=paymentId(paidBooking(1));
+        User admin=user(Role.ADMIN);
+        eventService.cancelEvent(organizer.getId(),event.getId(),"Canceled");
+        jdbc.update("UPDATE refunds SET amount=1 WHERE payments_id=?",id);
+        assertThatThrownBy(() -> refundWorkflow.queue(id,admin.getId()))
+                .isInstanceOf(com.eventhub.backend.exception.AdminException.class)
+                .hasMessageContaining("không khớp");
+        assertThat(refundWorkflow.detail(id).status()).isEqualTo("WAITING");
+    }
+
+    @Test
+    void interruptedAttemptClosesItsHistoryWithoutSendingAnotherRefund() throws Exception {
+        int id=paymentId(paidBooking(1));
+        User admin=user(Role.ADMIN);
+        eventService.cancelEvent(organizer.getId(),event.getId(),"Canceled");
+        refundWorkflow.queue(id,admin.getId());
+        refundWorkflow.claim(id,false);
+        jdbc.update("UPDATE refunds SET updated_at=? WHERE payments_id=?",now().minusMinutes(11),id);
+        refundWorkflow.recover(id);
+        var detail=refundWorkflow.detail(id);
+        assertThat(detail.status()).isEqualTo("RECONCILIATION");
+        assertThat(detail.attempts()).hasSize(1);
+        assertThat(detail.attempts().getFirst().outcome()).isEqualTo("RECONCILIATION");
+        assertThat(refundWorkflow.claim(id,false)).isNull();
+    }
+
+    @Test
     void cancellationRacingSuccessfulIpnLeavesNoUsableTicketsOrReservations() throws Exception {
         int bookingId=create(1).get("id").asInt();
         var data=callback(pay(bookingId),"00");
@@ -823,12 +1001,11 @@ class BookingIntegrationTests {
             assertThat(ipn.get(15,TimeUnit.SECONDS)).isEqualTo("00");
         }
         int paymentId=paymentId(bookingId);
-        String bookingStatus = jdbc.queryForObject("SELECT status FROM bookings WHERE id=?", String.class, bookingId);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM refunds WHERE payments_id=?",Integer.class,paymentId))
-                .isEqualTo("PAYMENT_REVIEW".equals(bookingStatus) ? 1 : 0);
+                .isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT reserved_quantity FROM ticket_types WHERE id=?", Integer.class, type.getId())).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM tickets t JOIN booking_items i ON i.id=t.booking_items_id WHERE i.bookings_id=? AND t.status='VALID'",Integer.class,bookingId)).isZero();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment_finances WHERE payments_id=?",Integer.class,paymentId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payments WHERE id=? AND finance_recorded_at IS NOT NULL",Integer.class,paymentId)).isEqualTo(1);
     }
 
     @Test
@@ -846,7 +1023,7 @@ class BookingIntegrationTests {
             assertThat(automatic.get(15,TimeUnit.SECONDS)).isNotEqualTo(manual.get(15,TimeUnit.SECONDS));
         }
         assertThat(refundWorkflow.detail(paymentId).status()).isIn("QUEUED","MANUAL_PENDING");
-        assertThat(jdbc.queryForObject("SELECT reversed FROM payment_finances WHERE payments_id=?",Boolean.class,paymentId)).isFalse();
+        assertThat(jdbc.queryForObject("SELECT finance_reversed FROM payments WHERE id=?",Boolean.class,paymentId)).isFalse();
     }
 
     private String qrToken(int id) {

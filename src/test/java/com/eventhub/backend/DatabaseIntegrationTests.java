@@ -57,7 +57,7 @@ class DatabaseIntegrationTests {
                 "event_guests", "user_event_interactions", "bookings", "booking_items",
                 "tickets", "payments", "refunds", "notifications", "ai_conversations",
                 "ai_messages", "organizer_wallets", "withdrawal_requests", "payout_transactions", "refresh_tokens",
-                "payment_finances", "refund_attempts", "refund_bank_accounts", "refund_evidence");
+                "event_ai_sync_logs", "ai_recommendation_logs", "user_ai_sync_logs", "refund_bank_accounts");
         flyway.validate();
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(flyway.migrate().migrationsExecuted).isZero();
@@ -354,8 +354,8 @@ class DatabaseIntegrationTests {
                     + "VALUES (1, 'migration@example.invalid', 'test-hash', 'CUSTOMER', 'ACTIVE')");
             Flyway upgraded = Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema)
                     .defaultSchema(schema).load();
-            assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(7);
-            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("8");
+            assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(10);
+            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("11");
             assertThat(jdbc.queryForObject("SELECT count(*) FROM pg_indexes WHERE schemaname=? "
                     + "AND indexname='uk_payout_transactions_transfer_reference'", Integer.class, schema)).isEqualTo(1);
             assertThat(upgraded.info().pending()).isEmpty();

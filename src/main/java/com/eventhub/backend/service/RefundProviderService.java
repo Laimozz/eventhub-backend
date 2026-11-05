@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class RefundProviderService {
     private final RefundWorkflowService workflow;
     private final VnPayService provider;
@@ -21,7 +22,10 @@ public class RefundProviderService {
             result=query?provider.queryRefund(work.payment(),work.requestId(),LocalDateTime.now(clock))
                     :provider.requestRefund(work.payment(),work.requestId(),work.adminId(),LocalDateTime.now(clock));
         } catch(RuntimeException ex) {
-            workflow.finish(work,null);
+            var failure=RefundProviderFailure.classify(ex);
+            log.warn("Refund provider failure paymentId={} requestId={} command={} code={} stage={} httpStatus={}",
+                    paymentId,work.requestId(),query?"querydr":"refund",failure.code(),failure.stage(),failure.httpStatus());
+            workflow.finish(work,null,failure);
             return;
         }
         // A commit failure must not be mistaken for a provider rejection or trigger another refund.

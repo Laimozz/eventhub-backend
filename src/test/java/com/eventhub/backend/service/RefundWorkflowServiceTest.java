@@ -50,12 +50,14 @@ class RefundWorkflowServiceTest {
     }
     @Test void timeoutRequiresReconciliationWithoutReversingMoney() {
         refund.setStatus("PROCESSING");
-        service.finish(new RefundWorkflowService.Work(payment,"attempt1",10,false),null);
+        when(workflow.isActiveAttempt(4,"attempt1")).thenReturn(true);
+        service.finish(new RefundWorkflowService.Work(RefundPaymentSnapshot.from(payment),"attempt1",10,false),null);
         assertThat(refund.getStatus()).isEqualTo("RECONCILIATION"); verifyNoInteractions(finance,notifications);
     }
     @Test void completesAndNotifiesOnlyOnceAcrossDuplicateResponses() {
         refund.setStatus("PROCESSING");
-        var work=new RefundWorkflowService.Work(payment,"attempt1",10,false);
+        when(workflow.isActiveAttempt(4,"attempt1")).thenReturn(true);
+        var work=new RefundWorkflowService.Work(RefundPaymentSnapshot.from(payment),"attempt1",10,false);
         var result=new VnPayService.ApiResult(true,false,"00","00","123");
         service.finish(work,result); service.finish(work,result);
         assertThat(refund.getStatus()).isEqualTo("COMPLETED"); verify(finance,times(1)).reverse(payment);
@@ -65,5 +67,13 @@ class RefundWorkflowServiceTest {
         when(ledger.entry(1)).thenReturn(new FinanceLedgerRepository.Entry(new BigDecimal("95000"),true,true,false));
         assertThatThrownBy(() -> service.queue(1,10)).isInstanceOf(AdminException.class);
         assertThat(refund.getStatus()).isEqualTo("WAITING");
+    }
+
+    @Test void preparingCanceledEventDoesNotRequireGatewayConfiguration() {
+        // This path takes an event ID, so payment-specific stubs are deliberately absent.
+        reset(workflow,refunds);
+        when(workflow.seedEvent(3)).thenReturn(2);
+        assertThat(service.prepareEvent(3)).isEqualTo(2);
+        verifyNoInteractions(vnpay,finance,notifications);
     }
 }

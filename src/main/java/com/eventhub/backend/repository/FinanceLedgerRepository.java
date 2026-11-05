@@ -14,9 +14,10 @@ public class FinanceLedgerRepository {
 
     public boolean record(Integer paymentId, BigDecimal gross, BigDecimal fee, boolean credited) {
         return jdbc.update("""
-                insert into payment_finances(payments_id, gross_amount, platform_fee, organizer_amount, credited)
-                values (?, ?, ?, ?, ?) on conflict (payments_id) do nothing
-                """, paymentId, gross, fee, gross.subtract(fee), credited) == 1;
+                update payments set gross_amount=?, platform_fee=?, organizer_amount=?, finance_credited=?,
+                    finance_recorded_at=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+                where id=? and finance_recorded_at is null
+                """, gross, fee, gross.subtract(fee), credited, paymentId) == 1;
     }
 
     public void ensureWallet(Integer organizerId) {
@@ -24,35 +25,27 @@ public class FinanceLedgerRepository {
     }
 
     public BigDecimal eventRevenue(Integer eventId) {
-        BigDecimal rev = jdbc.queryForObject("""
-                select coalesce(sum(f.gross_amount),0) from payment_finances f
-                join payments p on p.id=f.payments_id join bookings b on b.id=p.bookings_id
-                where b.events_id=? and f.credited and not f.reversed
+        return jdbc.queryForObject("""
+                select coalesce(sum(p.organizer_amount),0) from payments p
+                join bookings b on b.id=p.bookings_id
+                where b.events_id=? and p.finance_credited and not p.finance_reversed
                 """, BigDecimal.class, eventId);
-        if (rev == null || rev.signum() == 0) {
-            return jdbc.queryForObject("""
-                    select coalesce(sum(b.total_amount),0) from bookings b
-                    where b.events_id=? and b.status='PAID'
-                    """, BigDecimal.class, eventId);
-        }
-        return rev;
     }
 
     public List<Integer> settlementEvents(LocalDateTime now) {
         return jdbc.queryForList("""
                 select distinct e.id from events e join bookings b on b.events_id=e.id
-                join payments p on p.bookings_id=b.id join payment_finances f on f.payments_id=p.id
+                join payments p on p.bookings_id=b.id
                 where e.end_time <= ? and e.status in ('APPROVED','ONGOING','COMPLETED')
-                and f.credited and not f.settled and not f.reversed order by e.id limit 100
+                and p.finance_credited and not p.finance_settled and not p.finance_reversed order by e.id limit 100
                 """, Integer.class, now);
     }
 
     public List<Integer> releasablePayments(Integer eventId) {
         return jdbc.queryForList("""
                 select p.id from payments p join bookings b on b.id=p.bookings_id
-                join payment_finances f on f.payments_id=p.id
                 where b.events_id=? and b.status='PAID' and p.status='SUCCESS'
-                  and f.credited and not f.settled and not f.reversed
+                  and p.finance_credited and not p.finance_settled and not p.finance_reversed
                   and not exists(select 1 from refunds r where r.payments_id=p.id)
                   and (select count(*) from tickets t join booking_items i on i.id=t.booking_items_id
                        where i.bookings_id=b.id and t.status in ('VALID','USED'))
@@ -62,17 +55,20 @@ public class FinanceLedgerRepository {
     }
 
     public Entry entry(Integer paymentId) {
-        return jdbc.queryForObject("select * from payment_finances where payments_id=? for update",
-                (rs, row) -> new Entry(rs.getBigDecimal("organizer_amount"), rs.getBoolean("credited"),
-                        rs.getBoolean("settled"), rs.getBoolean("reversed")), paymentId);
+        return jdbc.query("select organizer_amount, finance_credited, finance_settled, finance_reversed from payments where id=? and finance_recorded_at is not null for update",
+                (rs, row) -> new Entry(rs.getBigDecimal("organizer_amount"), rs.getBoolean("finance_credited"),
+                        rs.getBoolean("finance_settled"), rs.getBoolean("finance_reversed")), paymentId).stream().findFirst()
+                .orElseThrow(() -> new com.eventhub.backend.exception.AdminException(
+                        org.springframework.http.HttpStatus.CONFLICT, "FINANCE_REQUIRES_RECONCILIATION",
+                        "Giao dịch thiếu dữ liệu tài chính; cần đối soát trước khi hoàn tiền."));
     }
 
     public void settle(Integer paymentId) {
-        jdbc.update("update payment_finances set settled=true where payments_id=?", paymentId);
+        jdbc.update("update payments set finance_settled=true where id=?", paymentId);
     }
 
     public void reverse(Integer paymentId) {
-        jdbc.update("update payment_finances set reversed=true where payments_id=?", paymentId);
+        jdbc.update("update payments set finance_reversed=true where id=?", paymentId);
     }
 
     public record Entry(BigDecimal organizerAmount, boolean credited, boolean settled, boolean reversed) {}

@@ -46,7 +46,8 @@ public class BookingController {
 
     @PostMapping("/{bookingId}/payments/vnpay")
     public PaymentUrl pay(@AuthenticationPrincipal UserResponse user, @PathVariable Integer bookingId,
+                          @Valid @RequestBody(required = false) com.eventhub.backend.dto.request.StartPaymentRequest body,
                           HttpServletRequest request) {
-        return bookings.startPayment(user.id(), bookingId, request.getRemoteAddr());
+        return bookings.startPayment(user.id(), bookingId, request.getRemoteAddr(), body == null ? null : body.bankAccount());
     }
 }

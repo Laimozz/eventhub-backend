@@ -44,6 +44,7 @@ public class BookingService {
     private final NotificationService notifications;
     private final FinanceLedgerService financeLedger;
     private final AiOutboxService aiOutbox;
+    private final RefundWorkflowRepository refundWorkflow;
 
     @Transactional(readOnly = true)
     public List<TicketTypeInfo> listTicketTypes(Integer userId, Integer eventId) {
@@ -145,7 +146,8 @@ public class BookingService {
     }
 
     @Transactional
-    public PaymentUrl startPayment(Integer userId, Integer bookingId, String ipAddress) {
+    public PaymentUrl startPayment(Integer userId, Integer bookingId, String ipAddress,
+            com.eventhub.backend.dto.request.PurchaseBankAccountRequest bankAccount) {
         requireCustomer(userId);
         Integer eventId = bookings.findOwnedEventId(bookingId, userId).orElseThrow(() -> notFound("Booking"));
         Event event = lockEvent(eventId);
@@ -155,8 +157,22 @@ public class BookingService {
             throw conflict("Booking is already paid, expired or cannot be paid");
         }
         requireBookable(event, now);
-        Payment payment = payments.findFirstByBookingIdAndStatusOrderByIdDesc(bookingId, "PENDING")
-                .orElseGet(() -> payments.saveAndFlush(newPayment(booking, "VNPAY")));
+        var pending = payments.findFirstByBookingIdAndStatusOrderByIdDesc(bookingId, "PENDING");
+        Payment payment;
+        if (pending.isPresent()) {
+            payment = pending.get();
+            if (bankAccount != null) {
+                var saved = refundWorkflow.bankAccount(payment.getId());
+                if (saved.isEmpty() || !saved.get().bankCode().equals(bankAccount.bankCode().trim())
+                        || !saved.get().accountNumber().equals(bankAccount.accountNumber().trim())
+                        || !saved.get().accountHolderName().equals(bankAccount.accountHolderName().trim())) {
+                    throw conflict("Thông tin tài khoản đã khóa cho lần thanh toán này; không thể thay đổi sau khi tạo liên kết.");
+                }
+            }
+        } else {
+            payment = payments.saveAndFlush(newPayment(booking, "VNPAY"));
+            if (bankAccount != null) refundWorkflow.declareBankAccount(payment.getId(),userId,bankAccount,now);
+        }
         String url = vnpay.createPaymentUrl(payment, ipAddress, booking.getExpiredAt());
         return new PaymentUrl(bookingId, payment.getId(), payment.getTransactionId(), url, booking.getExpiredAt());
     }
