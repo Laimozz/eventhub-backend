@@ -186,6 +186,26 @@ Phần customer chỉ cung cấp API xem vé, mã QR và trạng thái vé. Khi 
 
 Kiểm thử riêng phần mới: `.\mvnw.cmd "-Dtest=BookingIntegrationTests,ApplicationPropertiesTest" test`. Dùng Docker hoặc chế độ database test external theo hướng dẫn bên dưới; test ký callback bằng khóa test riêng, không liên hệ VNPay hoặc tạo thanh toán thật.
 
+#### Email xác nhận thanh toán
+
+Khi VNPay gửi IPN hợp lệ và đơn được chuyển sang `PAID` kèm vé đã phát hành, backend lưu yêu cầu gửi email vào bảng `payment_confirmation_emails` (Flyway V11). Email gửi tới địa chỉ tài khoản đặt vé, gồm mã đơn, tên sự kiện, số tiền, mã giao dịch VNPay, thời gian thanh toán và link **Xem vé điện tử**. Link mở trang vé hiện có và yêu cầu đăng nhập vào tài khoản mua vé nếu chưa đăng nhập.
+
+Tính năng mặc định tắt. Thêm các dòng sau vào `application-local.properties` (file được Git bỏ qua) rồi khởi động lại backend. Ví dụ dùng SMTP cổng 587 với STARTTLS:
+
+```properties
+app.payment-email.enabled=true
+app.payment-email.from=sender@example.com
+app.payment-email.frontend-base-url=http://localhost:5173
+spring.mail.host=smtp.example.com
+spring.mail.port=587
+spring.mail.username=sender@example.com
+spring.mail.password=YOUR_SMTP_PASSWORD
+```
+
+Đổi host, tài khoản và mật khẩu theo dịch vụ SMTP. Chọn địa chỉ `from` mà dịch vụ SMTP cho phép tài khoản đó gửi thư. Khi deploy hoặc mở mail trên thiết bị khác, đổi `frontend-base-url` sang địa chỉ truy cập được của frontend, ví dụ `https://eventhub.example.com`. Có thể cấu hình tương đương bằng các biến `PAYMENT_EMAIL_ENABLED`, `PAYMENT_EMAIL_FROM`, `PAYMENT_EMAIL_FRONTEND_URL`, `SPRING_MAIL_HOST`, `SPRING_MAIL_PORT`, `SPRING_MAIL_USERNAME` và `SPRING_MAIL_PASSWORD`. Nếu dùng SMTP thử nghiệm nội bộ không yêu cầu xác thực và TLS, đặt `SMTP_AUTH=false` và `SMTP_STARTTLS=false`.
+
+Để demo, thanh toán một đơn có phí trên VNPay Sandbox bằng tài khoản EventHub có email nhận được thư. Sau khi IPN tới backend, bộ gửi kiểm tra hàng đợi mỗi 5 giây. SMTP lỗi sẽ được thử lại sau một phút, tối đa 5 lần gửi. Có thể kiểm tra `sent_at` và `attempts` theo `booking_id` trong bảng trên. IPN lặp lại chỉ tạo một yêu cầu gửi cho mỗi đơn. Nếu SMTP đã nhận thư nhưng tiến trình dừng trước khi ghi `sent_at`, lần thử sau có thể gửi lại thư. Đơn cũ được thanh toán trước khi bật tính năng, vé miễn phí và đơn đang đối soát không phát sinh email xác nhận thanh toán.
+
 ### Entity và migration
 
 - Entity: `src/main/java/com/eventhub/backend/entity/`; repository: `src/main/java/com/eventhub/backend/repository/`.
