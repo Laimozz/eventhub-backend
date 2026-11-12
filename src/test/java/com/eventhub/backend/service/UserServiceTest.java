@@ -48,6 +48,9 @@ class UserServiceTest {
     @Mock
     private EventImageService eventImageService;
 
+    @Mock
+    private AiOutboxService aiOutbox;
+
     @InjectMocks
     private UserService userService;
 
@@ -150,7 +153,9 @@ class UserServiceTest {
                     eq("0522899888"),
                     eq("namnguyenhai08012004@gmail.com"),
                     eq(newDob),
-                    eq("Nam")
+                    eq("Nam"),
+                    any(),
+                    any()
             );
         }
 
@@ -193,7 +198,9 @@ class UserServiceTest {
                     eq("0522899888"),
                     eq("namnguyenhai08012004@gmail.com"),
                     eq(null),
-                    eq("Nam")
+                    eq("Nam"),
+                    any(),
+                    any()
             );
         }
 
@@ -221,7 +228,7 @@ class UserServiceTest {
                         assertThat(ex.getReason()).contains("Ngày sinh phải trước ngày hiện tại");
                     });
 
-            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any());
+            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -248,7 +255,7 @@ class UserServiceTest {
                         assertThat(ex.getReason()).contains("Ngày sinh phải trước ngày hiện tại");
                     });
 
-            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any());
+            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any(), any(), any());
         }
     }
 
@@ -279,7 +286,7 @@ class UserServiceTest {
                     .isInstanceOf(EmailAlreadyExistsException.class)
                     .hasMessageContaining("Email đã được sử dụng bởi tài khoản khác");
 
-            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any());
+            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -309,7 +316,9 @@ class UserServiceTest {
                     eq("0522899888"),
                     eq("namnguyenhai08012004@gmail.com"),
                     eq(LocalDate.of(2004, 1, 8)),
-                    eq("Nam")
+                    eq("Nam"),
+                    any(),
+                    any()
             );
         }
 
@@ -337,7 +346,7 @@ class UserServiceTest {
                         assertThat(ex.getReason()).contains("Email không đúng định dạng");
                     });
 
-            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any());
+            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any(), any(), any());
         }
     }
 
@@ -369,7 +378,7 @@ class UserServiceTest {
                         assertThat(ex.getReason()).contains("Số điện thoại không đúng định dạng");
                     });
 
-            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any());
+            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @ParameterizedTest
@@ -400,7 +409,9 @@ class UserServiceTest {
                     anyString(),
                     eq("namnguyenhai08012004@gmail.com"),
                     eq(LocalDate.of(2004, 1, 8)),
-                    eq("Nam")
+                    eq("Nam"),
+                    any(),
+                    any()
             );
         }
     }
@@ -433,7 +444,7 @@ class UserServiceTest {
                         assertThat(ex.getReason()).contains("Họ và tên không được để trống");
                     });
 
-            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any());
+            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any(), any(), any());
         }
 
         @Test
@@ -463,7 +474,9 @@ class UserServiceTest {
                     eq("0522899888"),
                     eq("namnguyenhai08012004@gmail.com"),
                     eq(LocalDate.of(2004, 1, 8)),
-                    eq("Nữ")
+                    eq("Nữ"),
+                    any(),
+                    any()
             );
         }
 
@@ -493,7 +506,9 @@ class UserServiceTest {
                     eq("0522899888"),
                     eq("namnguyenhai08012004@gmail.com"),
                     eq(LocalDate.of(2004, 1, 8)),
-                    eq("Nữ")
+                    eq("Nữ"),
+                    any(),
+                    any()
             );
         }
 
@@ -519,7 +534,7 @@ class UserServiceTest {
                         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
                     });
 
-            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any());
+            verify(userRepository, never()).updateUserDetailNative(any(), any(), any(), any(), any(), any(), any(), any());
         }
     }
 
