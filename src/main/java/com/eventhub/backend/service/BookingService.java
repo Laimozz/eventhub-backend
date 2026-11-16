@@ -44,6 +44,7 @@ public class BookingService {
     private final NotificationService notifications;
     private final FinanceLedgerService financeLedger;
     private final AiOutboxService aiOutbox;
+    private final PaymentEmailRepository paymentEmails;
 
     @Transactional(readOnly = true)
     public List<TicketTypeInfo> listTicketTypes(Integer userId, Integer eventId) {
@@ -210,6 +211,9 @@ public class BookingService {
                     && !paidAt.isAfter(booking.getExpiredAt()) && event.getEndTime().isAfter(LocalDateTime.now(clock))
                     && (event.getStatus() == EventStatus.APPROVED || event.getStatus() == EventStatus.ONGOING)) {
                 issueTickets(booking, bookingItems.findByBookingIdOrderByIdAsc(booking.getId()));
+                if (properties.getPaymentEmail().isEnabled()) {
+                    paymentEmails.enqueue(booking, payment);
+                }
             } else {
                 // Record actual money received even if a late IPN arrives after seats were released.
                 // Never issue seats that may now belong to another customer.

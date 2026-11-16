@@ -2,10 +2,12 @@ package com.eventhub.backend.config;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import lombok.Getter;
@@ -29,6 +31,30 @@ public class ApplicationProperties {
     @Valid
     @NotNull
     private Vnpay vnpay = new Vnpay();
+
+    @Valid
+    @NotNull
+    private PaymentEmail paymentEmail = new PaymentEmail();
+
+    @Getter
+    @Setter
+    public static class PaymentEmail {
+        private boolean enabled;
+        @Email
+        private String from;
+        private URI frontendBaseUrl = URI.create("http://localhost:5173");
+
+        @AssertTrue(message = "Payment email requires a sender and an HTTP(S) frontend origin")
+        public boolean isConfigured() {
+            return !enabled || (from != null && !from.isBlank()
+                    && frontendBaseUrl != null && frontendBaseUrl.getHost() != null
+                    && ("https".equalsIgnoreCase(frontendBaseUrl.getScheme())
+                        || "http".equalsIgnoreCase(frontendBaseUrl.getScheme()))
+                    && frontendBaseUrl.getUserInfo() == null && frontendBaseUrl.getQuery() == null
+                    && frontendBaseUrl.getFragment() == null
+                    && (frontendBaseUrl.getPath().isEmpty() || "/".equals(frontendBaseUrl.getPath())));
+        }
+    }
 
     @Getter
     @Setter

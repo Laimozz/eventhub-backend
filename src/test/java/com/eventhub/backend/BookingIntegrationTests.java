@@ -8,6 +8,11 @@ import com.eventhub.backend.repository.*;
 import com.eventhub.backend.security.AuthCookies;
 import com.eventhub.backend.security.JwtService;
 import com.eventhub.backend.service.BookingService;
+import com.eventhub.backend.service.PaymentEmailWorker;
+import jakarta.mail.Message;
+import jakarta.mail.Multipart;
+import jakarta.mail.Session;
+import jakarta.mail.internet.MimeMessage;
 import jakarta.servlet.http.Cookie;
 import java.math.BigDecimal;
 import java.net.URLDecoder;
@@ -21,6 +26,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -42,7 +48,11 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mail.MailSendException;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessagePreparator;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -58,6 +68,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -71,13 +83,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(locations = "classpath:auth-test.properties", properties = {
         "app.booking.expiry-enabled=false", "app.booking.ipn-grace-period=120s", "app.vnpay.tmn-code=TESTCODE",
         "app.vnpay.hash-secret=booking-test-only-secret",
-        "app.vnpay.return-url=http://localhost:8080/api/payments/vnpay/return"})
+        "app.vnpay.return-url=http://localhost:8080/api/payments/vnpay/return",
+        "app.payment-email.enabled=true", "app.payment-email.from=sender@example.test",
+        "app.payment-email.frontend-base-url=https://eventhub.example.test",
+        "app.payment-email.poll-delay=1d"})
 class BookingIntegrationTests {
     @Autowired private MockMvc mvc;
     @Autowired private ObjectMapper json;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private BookingService service;
-    @Autowired private com.eventhub.backend.service.FinanceLedgerService finance;
+    @MockitoSpyBean private com.eventhub.backend.service.FinanceLedgerService finance;
+    @Autowired private PaymentEmailWorker emailWorker;
+    @MockitoBean private JavaMailSender mailSender;
     @Autowired private com.eventhub.backend.service.RefundWorkflowService refundWorkflow;
     @Autowired private com.eventhub.backend.service.EventService eventService;
     @Autowired private com.eventhub.backend.service.EventLifecycleService lifecycle;
@@ -247,6 +264,7 @@ class BookingIntegrationTests {
         var callback = callback(pay(id), "00");
         ipn(callback).andExpect(jsonPath("$.RspCode").value("00"));
         ipn(callback).andExpect(jsonPath("$.RspCode").value("02"));
+        assertThat(count("payment_confirmation_emails", "booking_id", id)).isEqualTo(1);
         assertThat(count("notifications", "users_id", customer.getId())).isEqualTo(1);
         assertThat(count("notifications", "users_id", organizer.getId())).isEqualTo(1);
         assertThat(count("notifications", "users_id", other.getId())).isZero();
@@ -263,6 +281,55 @@ class BookingIntegrationTests {
     }
 
     @Test
+    void retriesPaymentEmailWithoutChangingPaidBooking() throws Exception {
+        jdbc.update("UPDATE events SET name = ? WHERE id = ?", "Hòa nhạc <Live>", event.getId());
+        int id = create(2).get("id").asInt();
+        var callback = callback(pay(id), "00");
+        var message = new MimeMessage(Session.getInstance(new Properties()));
+        doThrow(new MailSendException("SMTP unavailable")).doAnswer(invocation -> {
+            invocation.<MimeMessagePreparator>getArgument(0).prepare(message);
+            return null;
+        }).when(mailSender).send(any(MimeMessagePreparator.class));
+
+        ipn(callback).andExpect(jsonPath("$.RspCode").value("00"));
+        emailWorker.dispatch();
+        emailWorker.dispatch();
+        verify(mailSender).send(any(MimeMessagePreparator.class));
+        assertThat(jdbc.queryForMap("SELECT attempts, sent_at FROM payment_confirmation_emails WHERE booking_id = ?", id))
+                .containsEntry("attempts", 1).containsEntry("sent_at", null);
+        assertThat(bookings.findById(id).orElseThrow().getStatus()).isEqualTo("PAID");
+
+        jdbc.update("UPDATE payment_confirmation_emails SET next_attempt_at = CURRENT_TIMESTAMP WHERE booking_id = ?", id);
+        emailWorker.dispatch();
+        emailWorker.dispatch();
+        verify(mailSender, times(2)).send(any(MimeMessagePreparator.class));
+        assertThat(jdbc.queryForMap("SELECT sent_at FROM payment_confirmation_emails WHERE booking_id = ?", id)
+                .get("sent_at")).isNotNull();
+
+        String ticketUrl = "https://eventhub.example.test/customer/bookings/" + id + "/tickets";
+        assertThat(message.getRecipients(Message.RecipientType.TO)).hasSize(1);
+        assertThat(message.getRecipients(Message.RecipientType.TO)[0].toString()).isEqualTo(customer.getEmail());
+        assertThat(message.getSubject()).contains("Thanh toán thành công", "#" + id);
+        Multipart envelope = (Multipart) message.getContent();
+        Multipart alternatives = (Multipart) envelope.getBodyPart(0).getContent();
+        assertThat(alternatives.getBodyPart(0).getContent().toString())
+                .contains("Hòa nhạc <Live>", "300.001 VND", callback.getFirst("vnp_TransactionNo"), ticketUrl);
+        assertThat(alternatives.getBodyPart(1).getContent().toString())
+                .contains("Hòa nhạc &lt;Live&gt;", "href=\"" + ticketUrl + "\"")
+                .doesNotContain("Hòa nhạc <Live>");
+    }
+
+    @Test
+    void rollsBackEmailRequestWhenPaymentTransactionFails() throws Exception {
+        int id = create(1).get("id").asInt();
+        var callback = callback(pay(id), "00");
+        doThrow(new DataIntegrityViolationException("test ledger failure")).when(finance).recordPayment(any());
+        ipn(callback).andExpect(jsonPath("$.RspCode").value("99"));
+        assertThat(count("payment_confirmation_emails", "booking_id", id)).isZero();
+        assertThat(bookings.findById(id).orElseThrow().getStatus()).isEqualTo("PENDING");
+    }
+
+    @Test
     void browserReturnDoesNotConfirmPaymentAndIgnoresExpiredCookie() throws Exception {
         int id = create(1).get("id").asInt();
         var callback = callback(pay(id), "00");
@@ -270,6 +337,7 @@ class BookingIntegrationTests {
                         .cookie(new Cookie(AuthCookies.ACCESS, "expired-invalid-cookie")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.paymentStatus").value("PENDING"))
                 .andExpect(jsonPath("$.bookingStatus").value("PENDING"));
+        assertThat(count("payment_confirmation_emails", "booking_id", id)).isZero();
         assertInventory(4, 1);
         ipn(callback).andExpect(jsonPath("$.RspCode").value("00"));
     }
@@ -361,6 +429,7 @@ class BookingIntegrationTests {
                 .andExpect(jsonPath("$.status").value("PAYMENT_REVIEW"))
                 .andExpect(jsonPath("$.payments[0].status").value("SUCCESS"))
                 .andExpect(jsonPath("$.items[0].tickets.length()").value(0));
+        assertThat(count("payment_confirmation_emails", "booking_id", id)).isZero();
     }
 
     @Test
@@ -495,6 +564,7 @@ class BookingIntegrationTests {
         assertThat(booking.get("status").asText()).isEqualTo("PAID");
         assertThat(booking.at("/payments/0/paymentMethod").asText()).isEqualTo("FREE");
         assertThat(booking.at("/items/0/tickets").size()).isEqualTo(2);
+        assertThat(count("payment_confirmation_emails", "booking_id", booking.get("id").asInt())).isZero();
         assertInventory(3, 0);
     }
 

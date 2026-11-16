@@ -11,3 +11,12 @@ app.auth.refresh-token-ttl=7d
 app.auth.cookie-secure=false
 app.auth.cookie-same-site=Lax
 app.auth.allowed-origins=http://localhost:5173,http://localhost:3000
+
+# Enable payment confirmation email with an SMTP account that can send from this address.
+# app.payment-email.enabled=true
+# app.payment-email.from=sender@example.com
+# app.payment-email.frontend-base-url=http://localhost:5173
+# spring.mail.host=smtp.example.com
+# spring.mail.port=587
+# spring.mail.username=sender@example.com
+# spring.mail.password=YOUR_SMTP_PASSWORD
