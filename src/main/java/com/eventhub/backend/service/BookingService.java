@@ -44,7 +44,8 @@ public class BookingService {
     private final NotificationService notifications;
     private final FinanceLedgerService financeLedger;
     private final AiOutboxService aiOutbox;
-    private final PaymentEmailRepository paymentEmails;
+    private final org.springframework.context.ApplicationEventPublisher applicationEvents;
+    private final RefundRepository refunds;
 
     @Transactional(readOnly = true)
     public List<TicketTypeInfo> listTicketTypes(Integer userId, Integer eventId) {
@@ -212,7 +213,7 @@ public class BookingService {
                     && (event.getStatus() == EventStatus.APPROVED || event.getStatus() == EventStatus.ONGOING)) {
                 issueTickets(booking, bookingItems.findByBookingIdOrderByIdAsc(booking.getId()));
                 if (properties.getPaymentEmail().isEnabled()) {
-                    paymentEmails.enqueue(booking, payment);
+                    applicationEvents.publishEvent(PaymentEmailService.Confirmation.from(booking, payment));
                 }
             } else {
                 // Record actual money received even if a late IPN arrives after seats were released.
@@ -320,7 +321,9 @@ public class BookingService {
                         ticket.getStatus(), ticket.getCheckedInAt())).toList())).toList();
         var paymentInfo = payments.findByBookingIdOrderByIdDesc(booking.getId()).stream().map(payment -> new PaymentInfo(
                 payment.getId(), payment.getTransactionId(), payment.getGatewayTransactionId(), payment.getPaymentMethod(),
-                payment.getAmount(), payment.getStatus(), payment.getResponseCode(), payment.getCreatedAt(), payment.getPaidAt())).toList();
+                payment.getAmount(), payment.getStatus(), payment.getResponseCode(), payment.getCreatedAt(), payment.getPaidAt(),
+                refunds.findByPaymentId(payment.getId()).map(refund -> new RefundInfo(refund.getAmount(),refund.getStatus(),
+                        refund.getMethod(),refund.getProviderReference(),refund.getRefundedAt())).orElse(null))).toList();
         var deadline = confirmationDeadline(booking, paymentInfo.stream()
                 .anyMatch(payment -> "VNPAY".equals(payment.paymentMethod()) && "PENDING".equals(payment.status())));
         return new Detail(booking.getId(), visibleStatus(booking, deadline, LocalDateTime.now(clock)), booking.getTotalAmount(), "VND", booking.getCreatedAt(),

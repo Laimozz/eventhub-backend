@@ -1,8 +1,11 @@
 package com.eventhub.backend.service;
 
 import com.eventhub.backend.config.ApplicationProperties;
-import com.eventhub.backend.repository.PaymentEmailRepository;
-import com.eventhub.backend.repository.PaymentEmailRepository.PendingEmail;
+import com.eventhub.backend.entity.Booking;
+import com.eventhub.backend.entity.Payment;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import org.springframework.transaction.event.TransactionalEventListener;
 import java.nio.charset.StandardCharsets;
 import java.text.NumberFormat;
 import java.time.ZoneId;
@@ -15,54 +18,40 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.mail.MailException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.util.HtmlUtils;
 
 @Component
 @RequiredArgsConstructor
 @Slf4j
 @ConditionalOnProperty(name = "app.payment-email.enabled", havingValue = "true")
-public class PaymentEmailWorker {
+public class PaymentEmailService {
     private static final Locale VIETNAM = Locale.forLanguageTag("vi-VN");
     private static final DateTimeFormatter PAID_AT = DateTimeFormatter.ofPattern("dd/MM/uuuu HH:mm")
             .withZone(ZoneId.of("Asia/Ho_Chi_Minh"));
 
-    private final PaymentEmailRepository emails;
-    private final TransactionTemplate transaction;
     private final JavaMailSender sender;
     private final ApplicationProperties properties;
 
-    @Scheduled(scheduler = "paymentEmailScheduler", fixedDelayString = "${app.payment-email.poll-delay:5s}",
-            initialDelayString = "${app.payment-email.poll-delay:5s}")
-    public void dispatch() {
-        for (int i = 0; i < 10; i++) {
-            // Keep only this mail row locked during delivery, never the booking or payment.
-            if (!Boolean.TRUE.equals(transaction.execute(status -> dispatchNext()))) {
-                return;
-            }
-        }
-    }
-
-    private boolean dispatchNext() {
-        var due = emails.lockNextDue();
-        if (due.isEmpty()) return false;
-
-        PendingEmail email = due.get();
+    @TransactionalEventListener
+    public void onPaymentConfirmed(Confirmation email) {
         try {
             send(email);
         } catch (MailException exception) {
-            emails.recordFailure(email.bookingId());
-            log.warn("Payment confirmation email for booking {} failed on attempt {} ({})",
-                    email.bookingId(), email.attempts() + 1, exception.getClass().getSimpleName());
-            return true;
+            log.warn("Payment confirmation email for booking {} could not be sent ({})",
+                    email.bookingId(), exception.getClass().getSimpleName());
         }
-        emails.markSent(email.bookingId());
-        return true;
     }
 
-    private void send(PendingEmail email) {
+    public record Confirmation(int bookingId, String recipient, String eventName, BigDecimal amount,
+                               String transactionId, LocalDateTime paidAt) {
+        public static Confirmation from(Booking booking, Payment payment) {
+            return new Confirmation(booking.getId(), booking.getUser().getEmail(), booking.getEvent().getName(),
+                    payment.getAmount(), payment.getGatewayTransactionId(), payment.getPaidAt());
+        }
+    }
+
+    private void send(Confirmation email) {
         var config = properties.getPaymentEmail();
         String link = config.getFrontendBaseUrl().resolve("/customer/bookings/" + email.bookingId() + "/tickets")
                 .toASCIIString();

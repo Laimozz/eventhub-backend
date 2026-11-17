@@ -188,7 +188,7 @@ class EventIntegrationTests {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM event_guests WHERE events_id = ?", Integer.class,
                 eventId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications", Long.class))
-                .isEqualTo(initialCounts.get("notifications"));
+                .isEqualTo(initialCounts.get("notifications") + 1); // Organizer receives creation confirmation.
     }
 
     @ParameterizedTest
@@ -462,8 +462,8 @@ class EventIntegrationTests {
                 LocalDateTime.class, message.get("id")))
                 .isBetween(before, LocalDateTime.now(ZoneOffset.UTC).plusSeconds(1));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notifications WHERE users_id = ?", Long.class,
-                organizer.getId())).isZero();
-        assertThat(rowCounts().get("notifications")).isEqualTo(initialCounts.get("notifications") + 1);
+                organizer.getId())).isEqualTo(1);
+        assertThat(rowCounts().get("notifications")).isEqualTo(initialCounts.get("notifications") + 2);
     }
 
     @Test
@@ -484,7 +484,7 @@ class EventIntegrationTests {
         createAdmin(status);
         create(validRequest()).andExpect(status().isCreated());
         assertThat(rowCounts().get("events")).isEqualTo(initialCounts.get("events") + 1);
-        assertThat(rowCounts().get("notifications")).isEqualTo(initialCounts.get("notifications"));
+        assertThat(rowCounts().get("notifications")).isEqualTo(initialCounts.get("notifications") + 1);
     }
 
     @Test

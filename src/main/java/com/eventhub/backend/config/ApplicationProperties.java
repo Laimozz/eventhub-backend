@@ -88,8 +88,6 @@ public class ApplicationProperties {
         private String paymentUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
         @NotBlank
         private String returnUrl = "http://localhost:5173/customer/payment-result";
-        private String apiUrl = "https://sandbox.vnpayment.vn/merchant_webapi/api/transaction";
-        private String apiIpAddress = "127.0.0.1";
     }
 
     @Getter

@@ -1,4 +1,4 @@
--- EventHub demo data for PostgreSQL, after migrations V1 through V8.
+-- EventHub demo data for PostgreSQL, after migrations V1 through V12.
 -- Run this entire file in pgAdmin/DBeaver, or:
 --   psql -h localhost -U postgres -d eventhub_db -v ON_ERROR_STOP=1 -f seeddata.sql
 -- This file only adds data. Existing records are retained; rerunning skips this seed.
@@ -73,8 +73,8 @@ BEGIN
     -- Serialize concurrent runs of this same demo seed.
     PERFORM pg_advisory_xact_lock(20261023, 810);
 
-    IF to_regclass('payment_finances') IS NULL OR to_regclass('refund_evidence') IS NULL THEN
-        RAISE EXCEPTION 'Apply migrations V1 through V8 before running seeddata.sql.';
+    IF to_regclass('payment_finances') IS NULL OR to_regclass('refund_attempts') IS NULL THEN
+        RAISE EXCEPTION 'Apply migrations V1 through V12 before running seeddata.sql.';
     END IF;
 
     IF EXISTS (SELECT 1 FROM users WHERE lower(btrim(email)) = 'seed.admin@eventhub.local') THEN
@@ -333,19 +333,19 @@ BEGIN
             IF i = 10 THEN
                 refund_status := CASE j WHEN 1 THEN 'WAITING' WHEN 2 THEN 'COMPLETED'
                                         WHEN 3 THEN 'COMPLETED' WHEN 4 THEN 'FAILED'
-                                        WHEN 5 THEN 'MANUAL_PENDING' ELSE 'WAITING' END;
-                refund_method := CASE WHEN j IN (2, 4) THEN 'VNPAY' WHEN j IN (3, 5) THEN 'MANUAL' END;
+                                        WHEN 5 THEN 'RECONCILIATION' ELSE 'WAITING' END;
+                refund_method := CASE WHEN j IN (2, 3, 4, 5) THEN 'VNPAY' END;
                 INSERT INTO refunds (payments_id, refund_transaction_id, amount, status, retry_count,
                                      method, requested_by, provider_reference, response_code, transaction_status,
                                      last_error, refunded_at, created_at, updated_at)
                 VALUES (payment_id, 'refund-' || payment_id, total, refund_status,
-                        CASE WHEN j IN (2, 4) THEN 1 ELSE 0 END, refund_method,
+                        CASE WHEN j IN (2, 3, 4, 5) THEN 1 ELSE 0 END, refund_method,
                         CASE WHEN refund_method IS NOT NULL THEN admin_id END,
-                        CASE WHEN j = 2 THEN 'SEED-REFUND-VNPAY-' || payment_id
-                             WHEN j = 3 THEN 'SEED-REFUND-MANUAL-' || payment_id END,
-                        CASE WHEN j = 2 THEN '00' WHEN j = 4 THEN '91' END,
-                        CASE WHEN j = 2 THEN '00' END,
-                        CASE WHEN j = 4 THEN 'Dữ liệu demo: cổng thanh toán từ chối yêu cầu hoàn tiền.' END,
+                        CASE WHEN j IN (2, 3) THEN 'SEED-REFUND-VNPAY-' || payment_id END,
+                        CASE WHEN j IN (2, 3) THEN '00' WHEN j = 4 THEN '91' WHEN j = 5 THEN '94' END,
+                        CASE WHEN j IN (2, 3) THEN '00' WHEN j = 5 THEN '05' END,
+                        CASE WHEN j = 4 THEN 'Dữ liệu demo: cổng thanh toán từ chối yêu cầu hoàn tiền.'
+                             WHEN j = 5 THEN 'Dữ liệu demo: kết quả hoàn tiền cần đối soát.' END,
                         CASE WHEN refund_status = 'COMPLETED' THEN seed_now - INTERVAL '12 hours' END,
                         seed_now - INTERVAL '1 day', seed_now - INTERVAL '12 hours') RETURNING id INTO refund_id;
                 IF refund_status = 'COMPLETED' THEN
@@ -354,26 +354,13 @@ BEGIN
                     VALUES (user_id, 'Hoàn tiền thành công', 'Đã hoàn toàn bộ giao dịch #' || payment_id || '.',
                             'REFUND_COMPLETED', FALSE, seed_now - INTERVAL '12 hours');
                 END IF;
-                IF j IN (2, 4) THEN
+                IF j IN (2, 3, 4, 5) THEN
                     INSERT INTO refund_attempts (refunds_id, request_id, command, outcome, response_code,
                                                  transaction_status, created_at, completed_at)
                     VALUES (refund_id, md5('seed-refund-request-' || payment_id), 'refund', refund_status,
-                            CASE WHEN j = 2 THEN '00' ELSE '91' END, CASE WHEN j = 2 THEN '00' END,
+                            CASE WHEN j IN (2, 3) THEN '00' WHEN j = 4 THEN '91' ELSE '94' END,
+                            CASE WHEN j IN (2, 3) THEN '00' WHEN j = 5 THEN '05' END,
                             seed_now - INTERVAL '13 hours', seed_now - INTERVAL '12 hours');
-                END IF;
-                IF j IN (3, 4, 5) THEN
-                    INSERT INTO refund_bank_accounts (payment_id, bank_code, account_number, account_holder_name,
-                                                       verified_by, verified_at, created_at, updated_at)
-                    VALUES (payment_id, 'NCB', '0000' || lpad(user_id::TEXT, 8, '0'),
-                            'KHACH HANG DEMO ' || user_id, admin_id, seed_now - INTERVAL '14 hours',
-                            seed_now - INTERVAL '14 hours', seed_now - INTERVAL '14 hours');
-                END IF;
-                IF j = 3 THEN
-                    -- Valid one-pixel PNG fixture for the demo evidence download endpoint.
-                    INSERT INTO refund_evidence (refunds_id, transaction_code, content_type, content, recorded_by, recorded_at)
-                    VALUES (refund_id, 'SEED-REFUND-MANUAL-' || payment_id, 'image/png',
-                            decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgaGD4DwAChAGA+gVWHQAAAABJRU5ErkJggg==', 'base64'),
-                            admin_id, seed_now - INTERVAL '12 hours');
                 END IF;
                 INSERT INTO notifications (users_id, title, content, type, is_read, created_at)
                 VALUES (user_id, 'Sự kiện đã hủy', 'Sự kiện ' || event_row.name || ' đã hủy. Vui lòng theo dõi thông tin hoàn tiền.',

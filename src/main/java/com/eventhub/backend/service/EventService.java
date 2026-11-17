@@ -60,6 +60,7 @@ public class EventService {
     private final BookingService bookings;
     private final com.eventhub.backend.repository.TicketRepository issuedTickets;
     private final AiOutboxService aiOutbox;
+    private final com.eventhub.backend.repository.RefundWorkflowRepository refundWorkflow;
 
     @Transactional(readOnly = true)
     public EventListResponse listEvents(Integer organizerId, int page, int size, String search, EventStatus status) {
@@ -116,8 +117,11 @@ public class EventService {
         savedTickets.forEach(ticket -> ticket.setStatus("INACTIVE"));
         bookings.cancelReservations(eventId);
         issuedTickets.invalidateUnusedForEvent(eventId);
+        events.flush();
+        refundWorkflow.seedEvent(eventId);
         notifyAdmin(event, "Sự kiện đã hủy", "EVENT_CANCELED", "\" đã được hủy.");
-        String content = "Sự kiện #" + eventId + " đã được hủy. Lý do: " + event.getCancelReason();
+        String content = "Sự kiện #" + eventId + " đã được hủy. Lý do: " + event.getCancelReason()
+                + ". Các khoản hoàn tiền đang chờ Admin kích hoạt theo sự kiện.";
         notifications.create(event.getOrganizer(), "Sự kiện đã hủy", content, "EVENT_CANCELED");
         notifications.notifyEventParticipants(eventId, "Sự kiện đã hủy", content, "EVENT_CANCELED");
         events.flush();
