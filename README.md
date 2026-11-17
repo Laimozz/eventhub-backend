@@ -1,5 +1,7 @@
 # EventHub Backend
 
+Chạy bằng Docker: xem [DOCKER.md](DOCKER.md). Docker Compose cho cả FE, BE và PostgreSQL nằm trong repo `eventhub-frontend`.
+
 Chatbot AI cho Customer, Organizer, Staff và Admin: xem [cấu hình OpenRouter, API và phạm vi dữ liệu](AI-CHATBOT.md).
 
 Backend của dự án EventHub, sử dụng Java 21, Spring Boot và Maven. README này hướng dẫn cách chạy dự án, tổ chức mã nguồn và phối hợp bằng Git.
