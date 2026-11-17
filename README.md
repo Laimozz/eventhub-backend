@@ -1,5 +1,7 @@
 # EventHub Backend
 
+Chatbot AI cho Customer, Organizer, Staff và Admin: xem [cấu hình OpenRouter, API và phạm vi dữ liệu](AI-CHATBOT.md).
+
 Backend của dự án EventHub, sử dụng Java 21, Spring Boot và Maven. README này hướng dẫn cách chạy dự án, tổ chức mã nguồn và phối hợp bằng Git.
 
 ## 1. Công nghệ và trạng thái hiện tại

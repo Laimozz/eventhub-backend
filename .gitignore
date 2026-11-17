@@ -40,5 +40,5 @@ build/
 .env.*
 !.env.example
 seeddata.sql
-test/
+/test/
 seeddata-large.sql

@@ -2,7 +2,11 @@ package com.eventhub.backend.config;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -35,6 +39,39 @@ public class ApplicationProperties {
     @Valid
     @NotNull
     private PaymentEmail paymentEmail = new PaymentEmail();
+
+    @Valid
+    @NotNull
+    private Ai ai = new Ai();
+
+    @Getter
+    @Setter
+    public static class Ai {
+        private String apiKey = "";
+        // No model is selected in Java. Configure it through app.ai.model.
+        private String model = "";
+        @NotNull
+        @Min(1)
+        @Max(65536)
+        private Integer maxTokens = 1800;
+        @DecimalMin("0.0")
+        @DecimalMax("2.0")
+        private Double temperature;
+        // null: omit the override and use the selected provider's default.
+        private Boolean reasoningEnabled;
+        @NotNull
+        private Duration timeout = Duration.ofSeconds(45);
+
+        @AssertTrue(message = "AI timeout must be between 5 and 90 seconds")
+        public boolean isTimeoutValid() {
+            return timeout != null && timeout.compareTo(Duration.ofSeconds(5)) >= 0
+                    && timeout.compareTo(Duration.ofSeconds(90)) <= 0;
+        }
+
+        public boolean isAvailable() {
+            return apiKey != null && !apiKey.isBlank() && model != null && !model.isBlank();
+        }
+    }
 
     @Getter
     @Setter
