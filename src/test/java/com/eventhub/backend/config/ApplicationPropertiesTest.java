@@ -30,6 +30,50 @@ class ApplicationPropertiesTest {
                 });
     }
 
+    @Test
+    void aiHasNoImplicitModelAndRemainsDisabledUntilKeyAndModelAreConfigured() {
+        runner.withPropertyValues("app.ai.api-key=test-key").run(context -> {
+            assertThat(context).hasNotFailed();
+            var ai = context.getBean(ApplicationProperties.class).getAi();
+            assertThat(ai.getModel()).isEmpty();
+            assertThat(ai.isAvailable()).isFalse();
+            assertThat(ai.getReasoningEnabled()).isNull();
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"nvidia/nemotron-3-ultra-550b-a55b:free", "openrouter/free", "another/model:free"})
+    void bindsArbitraryConfiguredModelsAndGenerationOptions(String model) {
+        runner.withPropertyValues("app.ai.api-key=test-key", "app.ai.model=" + model,
+                        "app.ai.max-tokens=4000", "app.ai.temperature=0.7", "app.ai.reasoning-enabled=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    var ai = context.getBean(ApplicationProperties.class).getAi();
+                    assertThat(ai.getModel()).isEqualTo(model);
+                    assertThat(ai.getMaxTokens()).isEqualTo(4000);
+                    assertThat(ai.getTemperature()).isEqualTo(0.7);
+                    assertThat(ai.getReasoningEnabled()).isFalse();
+                    assertThat(ai.isAvailable()).isTrue();
+                });
+    }
+
+    @Test
+    void blankOptionalSettingsUseProviderDefaults() {
+        runner.withPropertyValues("app.ai.reasoning-enabled=", "app.ai.temperature=").run(context -> {
+            assertThat(context).hasNotFailed();
+            var ai = context.getBean(ApplicationProperties.class).getAi();
+            assertThat(ai.getReasoningEnabled()).isNull();
+            assertThat(ai.getTemperature()).isNull();
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"app.ai.max-tokens=0", "app.ai.max-tokens=65537", "app.ai.temperature=-0.1",
+            "app.ai.temperature=2.1", "app.ai.reasoning-enabled=invalid"})
+    void rejectsInvalidAiOptions(String property) {
+        runner.withPropertyValues(property).run(context -> assertThat(context).hasFailed());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "app.auth.access-token-ttl=0s", "app.auth.access-token-ttl=-1m",

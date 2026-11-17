@@ -353,10 +353,18 @@ class DatabaseIntegrationTests {
                     .target("1").load().migrate();
             jdbc.update("INSERT INTO " + schema + ".users (id, email, password, role, status) "
                     + "VALUES (1, 'migration@example.invalid', 'test-hash', 'CUSTOMER', 'ACTIVE')");
+            jdbc.update("INSERT INTO " + schema + ".ai_conversations (id, users_id, title) VALUES (1, 1, 'Legacy chat')");
+            jdbc.update("INSERT INTO " + schema + ".ai_messages (ai_conversations_id, role, content) VALUES (1, 'assistant', 'Existing answer')");
             Flyway upgraded = Flyway.configure().dataSource(jdbc.getDataSource()).schemas(schema)
                     .defaultSchema(schema).load();
-            assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(14);
-            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("15");
+            assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(15);
+            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("16");
+            assertThat(jdbc.queryForObject("SELECT owner_role FROM " + schema + ".ai_conversations WHERE id=1", String.class))
+                    .isEqualTo("CUSTOMER");
+            assertThat(jdbc.queryForObject("SELECT content FROM " + schema + ".ai_messages WHERE ai_conversations_id=1", String.class))
+                    .isEqualTo("Existing answer");
+            assertThat(jdbc.queryForObject("SELECT data_type FROM information_schema.columns WHERE table_schema=? "
+                    + "AND table_name='ai_messages' AND column_name='content'", String.class, schema)).isEqualTo("text");
             assertThat(jdbc.queryForObject("SELECT count(*) FROM pg_indexes WHERE schemaname=? "
                     + "AND indexname='uk_payout_transactions_transfer_reference'", Integer.class, schema)).isEqualTo(1);
             assertThat(upgraded.info().pending()).isEmpty();

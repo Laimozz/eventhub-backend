@@ -39,7 +39,7 @@ public class AiMessage {
     @Column(name = "role", nullable = true)
     private String role;
 
-    @Column(name = "content", nullable = true)
+    @Column(name = "content", columnDefinition = "text")
     private String content;
 
     @PrePersist
