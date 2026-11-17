@@ -1,0 +1,8 @@
+# Only Maven and source files are needed. Never send local credentials/dumps.
+**
+!pom.xml
+!src/
+!src/**
+**/application-local.properties
+**/.env*
+**/*.log
