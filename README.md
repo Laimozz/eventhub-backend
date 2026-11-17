@@ -20,11 +20,11 @@ Hiện tại dự án có entity/repository, migration Flyway và kiểm thử t
 - Job cập nhật mỗi 30 giây: `APPROVED` → `ONGOING` tại `startTime`, `APPROVED`/`ONGOING` → `COMPLETED` tại `endTime`, theo UTC. Dùng cùng khóa sự kiện với booking/hủy/xét duyệt; không đổi sự kiện chờ duyệt, bị từ chối hoặc đã hủy. Có thể cấu hình `app.events.lifecycle-enabled` và `app.events.lifecycle-delay` (mặc định `true`, `30s`).
 - Danh sách và gợi ý public chỉ trả sự kiện có `endTime` ở tương lai. Response tính trạng thái theo thời gian hiện tại ngay cả trước lượt chạy job; chi tiết vẫn đọc được sự kiện đã kết thúc.
 - API public trả thêm `status`, `salesStatus`; chi tiết trả các `ticketTypes` với giá, số còn lại, thời gian và trạng thái bán thực tế. Trạng thái bán gồm `NOT_ON_SALE`, `ON_SALE`, `SOLD_OUT`, `SALES_ENDED`, `UNAVAILABLE`.
-- Hủy sự kiện chuyển loại vé sang `INACTIVE`, vé chưa dùng sang `CANCELED`, giải phóng tất cả booking `PENDING` và đánh dấu các payment đang chờ thành `EXPIRED` trong cùng transaction. Lịch sử thanh toán được giữ. Thao tác hủy không tạo hồ sơ hoàn tiền; các luồng hoàn/đối soát được xử lý riêng.
+- Hủy sự kiện chuyển loại vé sang `INACTIVE`, vé chưa dùng sang `CANCELED`, giải phóng tất cả booking `PENDING` và đánh dấu các payment đang chờ thành `EXPIRED` trong cùng transaction. Lịch sử thanh toán được giữ. Thao tác hủy tạo hồ sơ hoàn chờ Admin xác nhận xử lý.
 
 ### Tài chính Admin UC37–UC42
 
-Đã có API thống kê số lượng/số dư, đọc đối soát sự kiện CANCELED và danh sách/chi tiết/duyệt/từ chối yêu cầu rút tiền. Hợp đồng ở [admin-finance-api.md](admin-finance-api.md). Doanh thu/phí chụp theo payment; đã có hoàn tự động VNPAY, đối soát và hoàn thủ công với tài khoản/chứng từ riêng cho Admin. Organizer hủy ngay trước giờ bắt đầu, Admin chủ động xếp hàng hoàn. Merchant sandbox cần nghiệm thu quyền query/refund. UC41 ghi nhận chuyển khoản đã thực hiện bên ngoài. Các phụ thuộc và trạng thái triển khai được theo dõi tại `../plan.md`.
+Đã có API thống kê số lượng/số dư, đọc đối soát sự kiện CANCELED và quản lý yêu cầu rút tiền. Hợp đồng ở [admin-finance-api.md](admin-finance-api.md). Refund chỉ xử lý nội bộ để mô phỏng: Admin xác nhận từng giao dịch hoặc hoàn hàng loạt, kết quả lưu ngay trong cùng transaction với đảo sổ tài chính và thông báo. Không gọi VNPAY Refund/QueryDR và không chuyển tiền thật. Thanh toán VNPAY PAY/IPN vẫn hoạt động. UC41 ghi nhận chuyển khoản đã thực hiện bên ngoài.
 
 ### Quản trị UC31–36
 
@@ -148,11 +148,13 @@ Frontend cần gửi credentials và header `X-CSRF-Protection: 1` khi gọi POS
 
 ### Customer booking và VNPay Sandbox
 
+**Refund nội bộ:** không cần cờ bật/tắt, API public, IP hoặc worker refund. `POST /api/admin/refunds/{paymentId}/complete` và `POST /api/admin/refund-events/{eventId}/refunds` chỉ cho ADMIN, cần CSRF. Lưu `COMPLETED`, method `INTERNAL`, mã `RF-...`, thời gian và Admin xử lý ngay trên bảng `refunds`. Khoản đã hoàn không đảo sổ/thông báo lần nữa. FE hiển thị “Hoàn tiền”/“Đã hoàn tiền”, không hiển thị nhãn mô phỏng. V15 xóa `refund_attempts` và `payment_confirmation_emails`, chuyển khoản lỗi/chờ API cũ về WAITING để xử lý lại; giữ nguyên payment, refund và sổ tài chính.
+
 Đã có API đặt vé, thanh toán, lịch sử và chi tiết booking cho CUSTOMER. Xem request/response và luồng frontend tại [Customer Booking API](api-endpoints.md#customer-booking-api).
 
 - Giá vé và customer lấy từ backend/phiên đăng nhập. Cấu hình hiện tại giữ vé 5 phút, tối đa đến lúc đóng bán hoặc bắt đầu sự kiện. Booking có payment VNPay PENDING được giữ thêm 120 giây để chờ IPN; hạn bắt đầu/thực hiện thanh toán không thay đổi. Job chạy mỗi 30 giây trả vé đủ điều kiện hết hạn về kho; khóa PostgreSQL bảo vệ khi nhiều người đặt/thanh toán đồng thời.
 - VNPay Sandbox dùng HMAC-SHA512, kiểm tra merchant, số tiền và mã giao dịch. IPN cập nhật payment và phát một vé/mã QR token cho mỗi vé đã mua trong cùng transaction. Return URL chỉ hiển thị kết quả; frontend đọc lại booking để biết trạng thái đã xác nhận.
-- Booking tổng tiền bằng 0 được xác nhận và phát vé ngay, phương thức `FREE`. Booking có IPN thành công sau khi đã trả vé về kho hoặc khi sự kiện không còn APPROVED chuyển `PAYMENT_REVIEW`, lưu payment thành công để đối soát; hồ sơ hoàn tiền được tạo để Admin xử lý trên dashboard (xem admin-finance-api.md).
+- Booking tổng tiền bằng 0 được xác nhận và phát vé ngay, phương thức `FREE`. Booking có IPN thành công nhưng không còn đủ điều kiện phát vé chuyển `PAYMENT_REVIEW`; tạo hồ sơ chờ Admin xử lý. Admin xử lý từng giao dịch hoặc theo sự kiện đã hủy.
 - Flyway V6 chỉ thêm hai cột payment và index, giữ nguyên bảng/dữ liệu và migration cũ. Chưa cấu hình VNPay thì tính năng khác vẫn khởi động, riêng tạo URL thanh toán trả `503`.
 
 Đăng ký merchant tại [VNPay Sandbox](https://sandbox.vnpayment.vn/devreg/), rồi cấu hình qua biến môi trường hoặc `application-local.properties` đã được Git bỏ qua:
@@ -188,9 +190,9 @@ Kiểm thử riêng phần mới: `.\mvnw.cmd "-Dtest=BookingIntegrationTests,Ap
 
 #### Email xác nhận thanh toán
 
-Khi VNPay gửi IPN hợp lệ và đơn được chuyển sang `PAID` kèm vé đã phát hành, backend lưu yêu cầu gửi email vào bảng `payment_confirmation_emails` (Flyway V11). Email gửi tới địa chỉ tài khoản đặt vé, gồm mã đơn, tên sự kiện, số tiền, mã giao dịch VNPay, thời gian thanh toán và link **Xem vé điện tử**. Link mở trang vé hiện có và yêu cầu đăng nhập vào tài khoản mua vé nếu chưa đăng nhập.
+Khi IPN hợp lệ chuyển đơn sang `PAID` và phát hành vé, backend phát sự kiện trong transaction. Listener gửi email sau khi commit thành công, không dùng bảng lưu hàng đợi. Email gồm mã đơn, tên sự kiện, số tiền, mã giao dịch và link vé. IPN lặp không gửi lại; rollback không gửi mail. Lỗi SMTP được ghi log và không đổi kết quả thanh toán; không tự retry email sau khi bỏ outbox.
 
-Tính năng mặc định tắt. Thêm các dòng sau vào `application-local.properties` (file được Git bỏ qua) rồi khởi động lại backend. Ví dụ dùng SMTP cổng 587 với STARTTLS:
+Cấu hình gửi email qua các dòng sau vào `application-local.properties` (file được Git bỏ qua) rồi khởi động lại backend. Ví dụ dùng SMTP cổng 587 với STARTTLS:
 
 ```properties
 app.payment-email.enabled=true
@@ -204,7 +206,7 @@ spring.mail.password=YOUR_SMTP_PASSWORD
 
 Đổi host, tài khoản và mật khẩu theo dịch vụ SMTP. Chọn địa chỉ `from` mà dịch vụ SMTP cho phép tài khoản đó gửi thư. Khi deploy hoặc mở mail trên thiết bị khác, đổi `frontend-base-url` sang địa chỉ truy cập được của frontend, ví dụ `https://eventhub.example.com`. Có thể cấu hình tương đương bằng các biến `PAYMENT_EMAIL_ENABLED`, `PAYMENT_EMAIL_FROM`, `PAYMENT_EMAIL_FRONTEND_URL`, `SPRING_MAIL_HOST`, `SPRING_MAIL_PORT`, `SPRING_MAIL_USERNAME` và `SPRING_MAIL_PASSWORD`. Nếu dùng SMTP thử nghiệm nội bộ không yêu cầu xác thực và TLS, đặt `SMTP_AUTH=false` và `SMTP_STARTTLS=false`.
 
-Để demo, thanh toán một đơn có phí trên VNPay Sandbox bằng tài khoản EventHub có email nhận được thư. Sau khi IPN tới backend, bộ gửi kiểm tra hàng đợi mỗi 5 giây. SMTP lỗi sẽ được thử lại sau một phút, tối đa 5 lần gửi. Có thể kiểm tra `sent_at` và `attempts` theo `booking_id` trong bảng trên. IPN lặp lại chỉ tạo một yêu cầu gửi cho mỗi đơn. Nếu SMTP đã nhận thư nhưng tiến trình dừng trước khi ghi `sent_at`, lần thử sau có thể gửi lại thư. Đơn cũ được thanh toán trước khi bật tính năng, vé miễn phí và đơn đang đối soát không phát sinh email xác nhận thanh toán.
+Để kiểm thử email, thanh toán một đơn có phí trên VNPAY Sandbox bằng tài khoản EventHub có địa chỉ email nhận được thư. Sau khi IPN được commit thành công, backend gửi email ngay qua SMTP. Không còn lịch gửi lại hay cột sent_at/attempts. Đơn cũ, vé miễn phí và đơn PAYMENT_REVIEW không phát sinh email xác nhận mới.
 
 ### Entity và migration
 

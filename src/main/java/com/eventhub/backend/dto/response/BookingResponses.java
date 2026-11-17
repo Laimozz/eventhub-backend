@@ -28,7 +28,9 @@ public final class BookingResponses {
 
     public record PaymentInfo(Integer id, String transactionId, String gatewayTransactionId,
                               String paymentMethod, BigDecimal amount, String status,
-                              String responseCode, LocalDateTime createdAt, LocalDateTime paidAt) {}
+                              String responseCode, LocalDateTime createdAt, LocalDateTime paidAt, RefundInfo refund) {}
+
+    public record RefundInfo(BigDecimal amount, String status, String method, String reference, LocalDateTime refundedAt) {}
 
     public record PaymentUrl(Integer bookingId, Integer paymentId, String transactionId,
                              String paymentUrl, LocalDateTime expiredAt) {}

@@ -91,7 +91,7 @@ public class AdminFinanceService {
                     refund == null ? null : refund.getRetryCount(), refund == null ? null : refund.getRefundedAt());
         });
         return new RefundDetailResponse(eventId, event.getName(), event.getCancelReason(), PageResponse.from(rows), true,
-                "Hoàn tiền chỉ bắt đầu sau khi Admin chọn hoàn hàng loạt hoặc xử lý từng giao dịch.");
+                "Admin cần bấm Hoàn tiền hàng loạt và xác nhận cho sự kiện này. Sau đó hệ thống mới xử lý các giao dịch VNPAY đủ điều kiện.");
     }
 
     public RefundReconciliationResponse getEventRefundReconciliation(Integer eventId) {

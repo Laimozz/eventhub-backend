@@ -19,18 +19,16 @@ import static org.mockito.Mockito.*;
 class RefundWorkflowServiceTest {
     @Mock RefundWorkflowRepository workflow;
     @Mock RefundRepository refunds;
-    @Mock PaymentRepository payments;
     @Mock EventRepository events;
     @Mock FinanceLedgerRepository ledger;
     @Mock FinanceLedgerService finance;
     @Mock NotificationService notifications;
-    @Mock VnPayService vnpay;
     Clock clock=Clock.fixed(Instant.parse("2026-10-22T00:00:00Z"),ZoneOffset.UTC);
     RefundWorkflowService service;
     Refund refund;
     Payment payment;
     @BeforeEach void setup() {
-        service=new RefundWorkflowService(workflow,refunds,payments,events,ledger,finance,notifications,vnpay,clock);
+        service=new RefundWorkflowService(workflow,refunds,events,ledger,finance,notifications,clock);
         var event=new Event(); event.setId(3); event.setStatus(EventStatus.CANCELED);
         var booking=new Booking(); booking.setId(2); booking.setEvent(event); booking.setStatus("PAID"); booking.setUser(new User());
         payment=new Payment(); payment.setId(1); payment.setBooking(booking); payment.setAmount(new BigDecimal("100000")); payment.setStatus("SUCCESS"); payment.setPaymentMethod("VNPAY");
@@ -38,32 +36,29 @@ class RefundWorkflowServiceTest {
         when(workflow.eventId(1)).thenReturn(Optional.of(3)); when(events.findForUpdate(3)).thenReturn(Optional.of(event));
         when(refunds.findByPaymentId(1)).thenReturn(Optional.of(refund));
     }
-    @Test void preventsManualTransferWhileProviderOutcomeIsUnknown() {
-        refund.setStatus("RECONCILIATION"); refund.setMethod("VNPAY");
-        assertThatThrownBy(() -> service.reserveManual(1,10)).isInstanceOf(AdminException.class);
+    @Test void completesAndNotifiesOnlyOnce() {
+        when(ledger.entry(1)).thenReturn(new FinanceLedgerRepository.Entry(new BigDecimal("95000"),true,false,false));
+        var first = service.complete(1,10);
+        var second = service.complete(1,10);
+        assertThat(first.status()).isEqualTo("COMPLETED");
+        assertThat(first.reference()).startsWith("RF-").isEqualTo(second.reference());
+        verify(finance,times(1)).reverse(payment);
+        verify(notifications,times(1)).create(any(),eq("Hoàn tiền thành công"),anyString(),eq("REFUND_COMPLETED"));
+    }
+    @Test void rejectsSettledMoney() {
+        when(ledger.entry(1)).thenReturn(new FinanceLedgerRepository.Entry(new BigDecimal("95000"),true,true,false));
+        assertThatThrownBy(() -> service.complete(1,10)).isInstanceOf(AdminException.class);
+        assertThat(refund.getStatus()).isEqualTo("WAITING");
         verifyNoInteractions(finance,notifications);
     }
-    @Test void refusesAutomaticTransferAfterManualReservation() {
-        refund.setStatus("MANUAL_PENDING");
-        assertThatThrownBy(() -> service.queue(1,10)).isInstanceOf(AdminException.class);
-        verify(refunds,never()).saveAndFlush(any());
+    @Test void rejectsUnpaidPayment() {
+        payment.setStatus("FAILED");
+        assertThatThrownBy(() -> service.complete(1,10)).isInstanceOf(AdminException.class);
+        verifyNoInteractions(finance,notifications);
     }
-    @Test void timeoutRequiresReconciliationWithoutReversingMoney() {
-        refund.setStatus("PROCESSING");
-        service.finish(new RefundWorkflowService.Work(payment,"attempt1",10,false),null);
-        assertThat(refund.getStatus()).isEqualTo("RECONCILIATION"); verifyNoInteractions(finance,notifications);
-    }
-    @Test void completesAndNotifiesOnlyOnceAcrossDuplicateResponses() {
-        refund.setStatus("PROCESSING");
-        var work=new RefundWorkflowService.Work(payment,"attempt1",10,false);
-        var result=new VnPayService.ApiResult(true,false,"00","00","123");
-        service.finish(work,result); service.finish(work,result);
-        assertThat(refund.getStatus()).isEqualTo("COMPLETED"); verify(finance,times(1)).reverse(payment);
-        verify(notifications,times(1)).create(any(),anyString(),anyString(),eq("REFUND_COMPLETED"));
-    }
-    @Test void cannotQueueAlreadySettledMoney() {
-        when(ledger.entry(1)).thenReturn(new FinanceLedgerRepository.Entry(new BigDecimal("95000"),true,true,false));
-        assertThatThrownBy(() -> service.queue(1,10)).isInstanceOf(AdminException.class);
-        assertThat(refund.getStatus()).isEqualTo("WAITING");
+    @Test void rejectsActiveEvent() {
+        payment.getBooking().getEvent().setStatus(EventStatus.APPROVED);
+        assertThatThrownBy(() -> service.complete(1,10)).isInstanceOf(AdminException.class);
+        verifyNoInteractions(finance,notifications);
     }
 }
