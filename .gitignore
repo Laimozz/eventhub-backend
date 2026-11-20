@@ -39,6 +39,5 @@ build/
 .env
 .env.*
 !.env.example
-seeddata.sql
 /test/
 seeddata-large.sql

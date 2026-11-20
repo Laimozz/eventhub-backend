@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<suite name="EventHub Selenium Automation Test Suite" verbose="1">
+
+    <test name="Environment Check">
+        <classes>
+            <class name="com.eventhub.automation.tests.CheckEnvironmentTest"/>
+        </classes>
+    </test>
+
+    <test name="UC01 - Dang Ky (Register)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc01_register"/>
+        </packages>
+    </test>
+
+    <test name="UC02 - Dang Nhap (Login)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc02_login"/>
+        </packages>
+    </test>
+
+    <test name="UC03 - Dang Xuat (Logout)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc03_logout"/>
+        </packages>
+    </test>
+
+    <test name="UC04 - Quan Ly Thong Tin Ca Nhan (Profile)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc04_profile"/>
+        </packages>
+    </test>
+
+    <test name="UC05 - Tim Kiem Su Kien (Search)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc05_search"/>
+        </packages>
+    </test>
+
+    <test name="UC06 - Loc Su Kien (Filter)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc06_filter"/>
+        </packages>
+    </test>
+
+    <test name="UC07 - Dat Ve Thanh Toan (Booking)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc07_booking"/>
+        </packages>
+    </test>
+
+    <test name="UC08 - Xem Chi Tiet Booking (Booking History)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc08_bookings"/>
+        </packages>
+    </test>
+
+    <test name="UC09 - Xem Ve Dien Tu (My Tickets &amp; QR)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc09_tickets"/>
+        </packages>
+    </test>
+
+    <test name="UC10 - Xem Thong Bao (Notifications)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc10_notifications"/>
+        </packages>
+    </test>
+
+    <test name="UC11 - Chat Voi AI (AI Assistant Chatbot)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc11_ai_chat"/>
+        </packages>
+    </test>
+
+    <test name="UC12 - Quan Ly Su Kien - Tao Su Kien (Create Event)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc12_create_event"/>
+        </packages>
+    </test>
+
+    <test name="UC13 - Quan Ly Staff Su Kien (Staff Dispatch)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc13_staff_dispatch"/>
+        </packages>
+    </test>
+
+    <test name="UC14 - Quan Ly Su Kien - Huy Su Kien (Cancel Event)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc14_cancel_event"/>
+        </packages>
+    </test>
+
+    <test name="UC15 - Quan Ly Yeu Cau Rut Tien (Organizer Wallet)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc15_withdrawal"/>
+        </packages>
+    </test>
+
+    <test name="UC16 - Quet QR Check In Ve (Staff Check-in)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc16_checkin"/>
+        </packages>
+    </test>
+
+    <test name="UC17 - Quan Tri Nguoi Dung (Admin Users)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc17_admin_users"/>
+        </packages>
+    </test>
+
+    <test name="UC18 - Quan Ly Danh Muc Su Kien (Admin Categories)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc18_admin_categories"/>
+        </packages>
+    </test>
+
+    <test name="UC19 - Duyet Su Kien (Admin Event Approval)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc19_event_approval"/>
+        </packages>
+    </test>
+
+    <test name="UC20 - Hoan Tien Su Kien Huy (Refund Management)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc20_refunds"/>
+        </packages>
+    </test>
+
+    <test name="UC21 - Duyet Yeu Cau Rut Tien (Admin Payout)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc21_admin_payout"/>
+        </packages>
+    </test>
+
+    <test name="UC22 - Bao Cao Thong Ke Ban To Chuc (Organizer Reports)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc22_organizer_reports"/>
+        </packages>
+    </test>
+
+    <test name="UC23 - Quan Ly Su Kien - Chinh Sua Su Kien (Edit Event)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc23_edit_event"/>
+        </packages>
+    </test>
+
+    <test name="UC24 - Bao Cao Thong Ke Admin (Admin Dashboard)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc24_admin_dashboard"/>
+        </packages>
+    </test>
+
+    <test name="UC25 - Doi Mat Khau (Change Password)">
+        <packages>
+            <package name="com.eventhub.automation.tests.uc25_change_password"/>
+        </packages>
+    </test>
+
+</suite>
