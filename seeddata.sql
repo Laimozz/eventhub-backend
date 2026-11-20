@@ -1,34 +1,29 @@
--- EventHub demo data for PostgreSQL, after migrations V1 through V12.
--- Run this entire file in pgAdmin/DBeaver, or:
---   psql -h localhost -U postgres -d eventhub_db -v ON_ERROR_STOP=1 -f seeddata.sql
--- This file only adds data. Existing records are retained; rerunning skips this seed.
--- Images are selected from the target database BEFORE inserting the demo records.
--- At least one existing image URL of at most 255 characters is required.
--- Dates are relative to execution time and stored as UTC, like the application.
---
--- Demo login password for ALL accounts: EventHub@123 (BCrypt, cost 12).
--- ADMIN:     seed.admin@eventhub.local
--- ORGANIZER: seed.organizer1@eventhub.local ... seed.organizer3@eventhub.local
--- STAFF:     seed.staff1@eventhub.local     ... seed.staff4@eventhub.local
--- CUSTOMER:  seed.customer1@eventhub.local  ... seed.customer10@eventhub.local
--- Payment/transfer references and bank accounts below are synthetic demo data.
--- No QUEUED/PROCESSING refunds are seeded, so the worker has no demo API jobs.
-
-BEGIN;
-SET LOCAL client_encoding = 'UTF8';
-SET LOCAL TIME ZONE 'UTC';
+-- EventHub local demo, PostgreSQL + Flyway V16. The single DO statement is atomic.
+-- Run against the migrated DB with psql -v ON_ERROR_STOP=1 -f seeddata.sql.
+-- Demo password: EventHub@123. The four entry points are demo20.admin@example.test,
+-- demo20.organizer1@example.test, demo20.staff1@example.test and demo20.customer1@example.test.
+-- All dates are relative to first import (UTC). Existing application records are retained.
 
 DO $seed$
 DECLARE
     seed_now TIMESTAMP := date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC');
     demo_password TEXT := '$2a$12$hweuGtSsNY/7tUFke/kHwuThHy/H/5qu9mC8o6U5Ds6gqFui..J9.';
-    all_images TEXT[];
-    thumbnail_images TEXT[];
-    banner_images TEXT[];
-    zone_images TEXT[];
-    ticket_images TEXT[];
-    guest_images TEXT[];
-    avatar_images TEXT[];
+    -- Unsplash photo IDs, ordered to match the event catalog below.
+    photo_ids TEXT[] := ARRAY[
+        '1470229722913-7c0e2dbbafd3', '1540575467063-178a50c2df87', '1511795409834-ef04bbd61622',
+        '1507842217343-583bb7270b66', '1552674605-db6ffd4facb5', '1516280440614-37939bbacd81',
+        '1519389950473-47ba0277781c', '1540039155733-5bb30b53aa14', '1414235077428-338989a2e8c0',
+        '1513364776144-60967b0f800f', '1518770660439-4636190af475', '1500530855697-b586d89ba3ee',
+        '1524758631624-e2822e304c36', '1500534623283-312aade485b7', '1455390582262-044cdead277a',
+        '1472396961693-142e6e269027', '1519681393784-d120267933ba', '1500534314209-a25ddb2bd429',
+        '1506157786151-b8491531f063', '1540039155733-5bb30b53aa14'];
+    portraits TEXT[] := ARRAY['1500648767791-00dcc994a43e', '1534528741775-53994a69daeb',
+                              '1506794778202-cad84cf45f1d', '1524504388940-b1c1722653e1'];
+    photo_base CONSTANT TEXT := 'https://images.unsplash.com/photo-';
+    event_photo TEXT;
+    recommended INTEGER[];
+    -- A compact, self-contained seating plan for the concert venues (VARCHAR(255)).
+    seating_plan CONSTANT TEXT := 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 90"><path fill="ivory" d="M0 0h180v90H0z"/><g text-anchor="middle"><text x="90" y="20">SAN KHAU</text><text x="90" y="48">VIP</text><text x="90" y="76">GA</text></g></svg>';
     admin_id INTEGER;
     organizer_ids INTEGER[] := '{}';
     staff_ids INTEGER[] := '{}';
@@ -48,7 +43,6 @@ DECLARE
     type_id INTEGER;
     booking_id INTEGER;
     payment_id INTEGER;
-    refund_id INTEGER;
     wallet_id INTEGER;
     withdrawal_id INTEGER;
     conversation_id INTEGER;
@@ -68,95 +62,51 @@ DECLARE
     ticket_status TEXT;
     payment_method TEXT;
     refund_status TEXT;
-    refund_method TEXT;
 BEGIN
     -- Serialize concurrent runs of this same demo seed.
     PERFORM pg_advisory_xact_lock(20261023, 810);
 
-    IF to_regclass('payment_finances') IS NULL OR to_regclass('refund_attempts') IS NULL THEN
-        RAISE EXCEPTION 'Apply migrations V1 through V12 before running seeddata.sql.';
+    IF EXISTS (SELECT FROM users WHERE email = 'demo20.admin@example.test' AND role = 'ADMIN') THEN
+        RAISE NOTICE 'EventHub demo20 already imported.';
+        RETURN;
     END IF;
 
-    IF EXISTS (SELECT 1 FROM users WHERE lower(btrim(email)) = 'seed.admin@eventhub.local') THEN
-        IF (SELECT count(*) FROM events e JOIN users u ON u.id = e.organizer_id
-            WHERE u.email IN ('seed.organizer1@eventhub.local', 'seed.organizer2@eventhub.local',
-                              'seed.organizer3@eventhub.local')) = 10 THEN
-            RAISE NOTICE 'EventHub demo data already exists; no rows were changed.';
-            RETURN;
-        END IF;
-        RAISE EXCEPTION 'Seed accounts already exist but the demo is incomplete. No data was changed.';
-    END IF;
-
-    -- Reuse actual image links in this database; do not invent external URLs.
-    SELECT array_agg(url ORDER BY url) INTO all_images
-    FROM (
-        SELECT btrim(thumbnail_image_url) AS url FROM events
-        UNION SELECT btrim(banner_image_url) FROM events
-        UNION SELECT btrim(image_zone_url) FROM events
-        UNION SELECT btrim(image_url) FROM ticket_types
-        UNION SELECT btrim(image_url) FROM event_guests
-        UNION SELECT btrim(avatar_url) FROM users
-    ) images WHERE url IS NOT NULL AND length(url) BETWEEN 1 AND 255;
-
-    IF coalesce(cardinality(all_images), 0) = 0 THEN
-        all_images := ARRAY[
-            'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800',
-            'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800',
-            'https://images.unsplash.com/photo-1511578314322-379afb476865?w=800',
-            'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800',
-            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400'
-        ];
-    END IF;
-
-    SELECT array_agg(DISTINCT thumbnail_image_url ORDER BY thumbnail_image_url)
-        INTO thumbnail_images FROM events WHERE length(btrim(thumbnail_image_url)) BETWEEN 1 AND 255;
-    SELECT array_agg(DISTINCT banner_image_url ORDER BY banner_image_url)
-        INTO banner_images FROM events WHERE length(btrim(banner_image_url)) BETWEEN 1 AND 255;
-    SELECT array_agg(DISTINCT image_zone_url ORDER BY image_zone_url)
-        INTO zone_images FROM events WHERE length(btrim(image_zone_url)) BETWEEN 1 AND 255;
-    SELECT array_agg(DISTINCT image_url ORDER BY image_url)
-        INTO ticket_images FROM ticket_types WHERE length(btrim(image_url)) BETWEEN 1 AND 255;
-    SELECT array_agg(DISTINCT image_url ORDER BY image_url)
-        INTO guest_images FROM event_guests WHERE length(btrim(image_url)) BETWEEN 1 AND 255;
-    SELECT array_agg(DISTINCT avatar_url ORDER BY avatar_url)
-        INTO avatar_images FROM users WHERE length(btrim(avatar_url)) BETWEEN 1 AND 500;
-    thumbnail_images := coalesce(thumbnail_images, all_images);
-    banner_images := coalesce(banner_images, thumbnail_images);
-    zone_images := coalesce(zone_images, banner_images);
-    ticket_images := coalesce(ticket_images, thumbnail_images);
-    guest_images := coalesce(guest_images, thumbnail_images);
-    avatar_images := coalesce(avatar_images, guest_images);
-
-    -- 18 accounts: 1 admin, 3 organizers, 4 staff, 10 customers.
+    -- 20 accounts, including one locked customer for account administration.
     FOR row_data IN SELECT * FROM (VALUES
-        (1, 'seed.admin@eventhub.local', 'Quản trị EventHub Demo', 'ADMIN'),
-        (2, 'seed.organizer1@eventhub.local', 'Nguyễn Minh Anh', 'ORGANIZER'),
-        (3, 'seed.organizer2@eventhub.local', 'Trần Hoàng Nam', 'ORGANIZER'),
-        (4, 'seed.organizer3@eventhub.local', 'Lê Thảo Vy', 'ORGANIZER'),
-        (5, 'seed.staff1@eventhub.local', 'Phạm Quốc Huy', 'STAFF'),
-        (6, 'seed.staff2@eventhub.local', 'Võ Ngọc Mai', 'STAFF'),
-        (7, 'seed.staff3@eventhub.local', 'Đặng Tuấn Kiệt', 'STAFF'),
-        (8, 'seed.staff4@eventhub.local', 'Bùi Khánh Linh', 'STAFF'),
-        (9, 'seed.customer1@eventhub.local', 'Nguyễn Gia Bảo', 'CUSTOMER'),
-        (10, 'seed.customer2@eventhub.local', 'Trần Minh Châu', 'CUSTOMER'),
-        (11, 'seed.customer3@eventhub.local', 'Lê Đức Phúc', 'CUSTOMER'),
-        (12, 'seed.customer4@eventhub.local', 'Phạm Hà My', 'CUSTOMER'),
-        (13, 'seed.customer5@eventhub.local', 'Hoàng Thanh Tùng', 'CUSTOMER'),
-        (14, 'seed.customer6@eventhub.local', 'Vũ Bảo Ngọc', 'CUSTOMER'),
-        (15, 'seed.customer7@eventhub.local', 'Đỗ Anh Khoa', 'CUSTOMER'),
-        (16, 'seed.customer8@eventhub.local', 'Phan Quỳnh Anh', 'CUSTOMER'),
-        (17, 'seed.customer9@eventhub.local', 'Đặng Hải Đăng', 'CUSTOMER'),
-        (18, 'seed.customer10@eventhub.local', 'Bùi Ngọc Hân', 'CUSTOMER')
+        (1, 'demo20.admin@example.test', 'Quản trị EventHub Demo', 'ADMIN'),
+        (2, 'demo20.organizer1@example.test', 'Nguyễn Minh Anh', 'ORGANIZER'),
+        (3, 'demo20.organizer2@example.test', 'Trần Hoàng Nam', 'ORGANIZER'),
+        (4, 'demo20.organizer3@example.test', 'Lê Thảo Vy', 'ORGANIZER'),
+        (5, 'demo20.staff1@example.test', 'Phạm Quốc Huy', 'STAFF'),
+        (6, 'demo20.staff2@example.test', 'Võ Ngọc Mai', 'STAFF'),
+        (7, 'demo20.staff3@example.test', 'Đặng Tuấn Kiệt', 'STAFF'),
+        (8, 'demo20.staff4@example.test', 'Bùi Khánh Linh', 'STAFF'),
+        (9, 'demo20.customer1@example.test', 'Nguyễn Gia Bảo', 'CUSTOMER'),
+        (10, 'demo20.customer2@example.test', 'Trần Minh Châu', 'CUSTOMER'),
+        (11, 'demo20.customer3@example.test', 'Lê Đức Phúc', 'CUSTOMER'),
+        (12, 'demo20.customer4@example.test', 'Phạm Hà My', 'CUSTOMER'),
+        (13, 'demo20.customer5@example.test', 'Hoàng Thanh Tùng', 'CUSTOMER'),
+        (14, 'demo20.customer6@example.test', 'Vũ Bảo Ngọc', 'CUSTOMER'),
+        (15, 'demo20.customer7@example.test', 'Đỗ Anh Khoa', 'CUSTOMER'),
+        (16, 'demo20.customer8@example.test', 'Phan Quỳnh Anh', 'CUSTOMER'),
+        (17, 'demo20.customer9@example.test', 'Đặng Hải Đăng', 'CUSTOMER'),
+        (18, 'demo20.customer10@example.test', 'Bùi Ngọc Hân', 'CUSTOMER'),
+        (19, 'demo20.customer11@example.test', 'Ngô Thanh Hà', 'CUSTOMER'),
+        (20, 'demo20.customer12@example.test', 'Lý Hoài Phong', 'CUSTOMER')
     ) AS accounts(n, email, full_name, role) ORDER BY n LOOP
         INSERT INTO users (email, password, full_name, phone, role, status, date_of_birth,
-                           gender, avatar_url, created_at, updated_at)
+                           gender, avatar_url, city, preferred_categories, created_at, updated_at)
         VALUES (row_data.email, demo_password, row_data.full_name,
-                '0908' || lpad(row_data.n::TEXT, 6, '0'), row_data.role, 'ACTIVE',
+                '0908' || lpad(row_data.n::TEXT, 6, '0'), row_data.role, CASE WHEN row_data.n = 20 THEN 'LOCKED' ELSE 'ACTIVE' END,
                 DATE '1990-01-01' + row_data.n * 137,
                 CASE WHEN row_data.n % 2 = 0 THEN 'FEMALE' ELSE 'MALE' END,
-                avatar_images[1 + (row_data.n - 1) % cardinality(avatar_images)],
+                photo_base || portraits[1 + (row_data.n - 1) % 4] || '?auto=format&fit=crop&w=200&q=75',
+                (ARRAY['Hồ Chí Minh','Hà Nội','Đà Nẵng'])[1 + (row_data.n - 1) % 3],
+                (ARRAY['Âm nhạc, Nghệ thuật','Công nghệ, Kinh doanh','Cộng đồng, Thể thao'])[1 + (row_data.n - 1) % 3],
                 seed_now - INTERVAL '90 days', seed_now - INTERVAL '1 day')
         RETURNING id INTO user_id;
+        INSERT INTO user_ai_sync_logs (users_id, action_type, status, updated_at)
+        VALUES (user_id, 'CREATE_USER', 'PENDING', seed_now);
         CASE row_data.role
             WHEN 'ADMIN' THEN admin_id := user_id;
             WHEN 'ORGANIZER' THEN organizer_ids := array_append(organizer_ids, user_id);
@@ -204,21 +154,32 @@ BEGIN
         venue_ids := array_append(venue_ids, venue_id);
     END LOOP;
 
-    -- 10 events. Day offsets are relative to the UTC execution date.
+    -- 20 events. Day offsets are relative to the UTC execution date.
     FOR row_data IN SELECT * FROM (VALUES
         (1, 1, 1, 1, 'Đêm nhạc Thành phố lên đèn', 'Đêm nhạc pop và acoustic cùng các nghệ sĩ trẻ, giao lưu khán giả và trải nghiệm sân khấu trực tiếp.', 'APPROVED', 14, 12, 4, 350000),
         (2, 2, 2, 2, 'Vietnam AI & Developer Day', 'Hội thảo AI ứng dụng, phát triển phần mềm và kết nối cộng đồng lập trình viên.', 'APPROVED', 21, 2, 8, 250000),
         (3, 2, 3, 3, 'Startup Connect Việt Nam', 'Kết nối nhà sáng lập, doanh nghiệp và nhà đầu tư qua tọa đàm và hoạt động networking.', 'APPROVED', 28, 2, 7, 300000),
         (4, 3, 6, 4, 'Ngày hội Sách và Sống xanh', 'Ngày hội miễn phí với đổi sách, tái chế và các hoạt động cộng đồng dành cho gia đình.', 'APPROVED', 10, 1, 8, 0),
         (5, 3, 4, 4, 'Run Together - Chạy vì cộng đồng', 'Hoạt động chạy bộ cộng đồng, tiếp sức và giao lưu với các câu lạc bộ thể thao.', 'ONGOING', 0, 0, 4, 150000),
-        (6, 1, 1, 6, 'Acoustic Cuối tuần bên nhau', 'Đêm nhạc acoustic đã diễn ra, có lịch sử bán vé và check-in để xem thống kê doanh thu.', 'COMPLETED', -14, 12, 4, 200000),
+        (6, 1, 1, 6, 'Acoustic Cuối tuần bên nhau', 'Một đêm nhạc mộc với guitar, cajón và những ca khúc do khán giả yêu cầu.', 'COMPLETED', -14, 12, 4, 200000),
         (7, 2, 2, 5, 'Workshop Spring Boot thực chiến', 'Workshop xây dựng API, thiết kế dữ liệu và chia sẻ kinh nghiệm triển khai ứng dụng.', 'COMPLETED', -7, 2, 7, 400000),
         (8, 1, 1, 1, 'Jazz Night - Giai điệu mùa thu', 'Đêm nhạc jazz đang chờ quản trị viên kiểm tra và duyệt nội dung.', 'PENDING_APPROVAL', 35, 12, 3, 280000),
         (9, 3, 6, 3, 'Ngày hội Ẩm thực và Văn hóa', 'Bản đề xuất cần bổ sung thông tin tổ chức trước khi gửi duyệt lại.', 'REJECTED', 40, 2, 8, 100000),
-        (10, 3, 5, 6, 'Art & Light - Không gian sắc màu', 'Triển lãm nghệ thuật đã hủy; có dữ liệu mẫu cho quy trình hoàn tiền tự động và thủ công.', 'CANCELED', 30, 3, 6, 180000)
+        (10, 3, 5, 6, 'Art & Light - Không gian sắc màu', 'Triển lãm ánh sáng và tranh đa chất liệu. Chương trình đã hủy do địa điểm bảo trì.', 'CANCELED', 30, 3, 6, 180000),
+        (11, 2, 2, 2, 'Ngày hội Robot học đường', 'Lắp ráp cảm biến và lập trình robot bám đường theo nhóm.', 'APPROVED', 18, 2, 7, 160000),
+        (12, 3, 5, 4, 'Dạo phố cùng máy ảnh', 'Thực hành bố cục và ánh sáng tự nhiên trong buổi đi bộ chụp ảnh.', 'APPROVED', 9, 1, 3, 120000),
+        (13, 2, 3, 5, 'Chợ phiên Thiết kế Việt', 'Gặp gỡ các xưởng thiết kế nhỏ và chia sẻ cách xây dựng thương hiệu.', 'APPROVED', 23, 2, 6, 80000),
+        (14, 3, 4, 4, 'Yoga dưới tán cây', 'Buổi tập thở và giãn cơ ngoài trời dành cho người mới.', 'APPROVED', 5, 0, 2, 0),
+        (15, 1, 5, 5, 'Xưởng viết Những lá thư', 'Viết tản văn và đọc bản thảo cùng nhóm tác giả trẻ.', 'APPROVED', 16, 6, 3, 90000),
+        (16, 3, 6, 6, 'Nhật ký thiên nhiên', 'Nhận diện cây bản địa và vẽ sổ tay thực địa cùng tình nguyện viên.', 'COMPLETED', -12, 1, 4, 120000),
+        (17, 2, 2, 3, 'Đêm quan sát bầu trời', 'Nhận diện chòm sao và thực hành điều chỉnh kính thiên văn.', 'APPROVED', 32, 12, 3, 110000),
+        (18, 3, 4, 6, 'Đi bộ ven sông Hàn', 'Hành trình đi bộ theo nhóm và thử thách ghi lại cảnh quan ven sông.', 'APPROVED', 12, 0, 3, 70000),
+        (19, 1, 1, 1, 'Sân khấu Ban nhạc trẻ', 'Các ban nhạc sinh viên trình diễn những sáng tác đầu tay.', 'APPROVED', 27, 11, 4, 210000),
+        (20, 1, 1, 6, 'Đêm diễn Giao mùa', 'Đêm nhạc kết hợp nhạc cụ dân tộc và âm thanh điện tử.', 'PENDING_CANCELLATION', 22, 12, 3, 240000)
     ) AS events_seed(n, organizer_no, category_no, venue_no, name, description, status, day_offset, start_hour, duration_hours, price)
     ORDER BY n LOOP
         i := row_data.n;
+        event_photo := photo_base || photo_ids[i];
         starts_at := date_trunc('day', seed_now) + row_data.day_offset * INTERVAL '1 day'
                      + row_data.start_hour * INTERVAL '1 hour';
         IF row_data.status = 'ONGOING' THEN starts_at := seed_now - INTERVAL '1 hour'; END IF;
@@ -229,10 +190,10 @@ BEGIN
         VALUES (0, organizer_ids[row_data.organizer_no],
                 CASE WHEN row_data.status = 'PENDING_APPROVAL' THEN NULL ELSE admin_id END,
                 venue_ids[row_data.venue_no], category_ids[row_data.category_no], row_data.name, row_data.description,
-                thumbnail_images[1 + (i - 1) % cardinality(thumbnail_images)],
-                banner_images[1 + (i - 1) % cardinality(banner_images)],
-                zone_images[1 + (i - 1) % cardinality(zone_images)], starts_at, ends_at, row_data.status,
-                CASE WHEN row_data.status = 'CANCELED' THEN 'Địa điểm bảo trì, ban tổ chức không thể triển khai đúng kế hoạch.' END,
+                event_photo || '?auto=format&fit=crop&w=800&q=75',
+                event_photo || '?auto=format&fit=crop&w=1600&q=80',
+                CASE WHEN row_data.category_no = 1 THEN seating_plan END, starts_at, ends_at, row_data.status,
+                CASE WHEN row_data.status IN ('CANCELED','PENDING_CANCELLATION') THEN 'Địa điểm bảo trì, ban tổ chức không thể triển khai đúng kế hoạch.' END,
                 CASE WHEN row_data.status = 'CANCELED' THEN seed_now - INTERVAL '1 day' END,
                 CASE WHEN row_data.status = 'REJECTED' THEN 'Cần bổ sung phương án an toàn và xác nhận địa điểm.' END,
                 CASE WHEN row_data.status <> 'PENDING_APPROVAL' THEN seed_now - INTERVAL '55 days' END,
@@ -242,18 +203,21 @@ BEGIN
         RETURNING id INTO event_id;
         event_ids := array_append(event_ids, event_id);
 
-        -- Three types per event: 260 tickets in total, within every venue's capacity.
+        -- Event 19 is a small, fully booked show. All allocations fit the venues.
         FOR j IN 1..3 LOOP
             unit_price := row_data.price * CASE j WHEN 1 THEN 1.0 WHEN 2 THEN 2.0 ELSE 0.8 END;
-            ticket_quantity := CASE j WHEN 1 THEN 120 WHEN 2 THEN 60 ELSE 80 END;
+            ticket_quantity := CASE WHEN i = 19 THEN CASE j WHEN 1 THEN 4 WHEN 2 THEN 4 ELSE 6 END
+                                    ELSE CASE j WHEN 1 THEN 120 WHEN 2 THEN 60 ELSE 80 END END;
             INSERT INTO ticket_types (events_id, name, description, image_url, price, quantity,
                                       reserved_quantity, remaining_quantity, sale_start_time, sale_end_time, status)
             VALUES (event_id, CASE j WHEN 1 THEN 'Tiêu chuẩn' WHEN 2 THEN 'VIP' ELSE 'Early Bird' END,
                     CASE j WHEN 1 THEN 'Vé vào cửa và tham gia các hoạt động chính.'
                            WHEN 2 THEN 'Khu vực ưu tiên và quà tặng từ ban tổ chức.'
                            ELSE 'Ưu đãi dành cho khách đăng ký sớm.' END,
-                    ticket_images[1 + (i + j - 2) % cardinality(ticket_images)], unit_price, ticket_quantity,
-                    0, ticket_quantity, seed_now - INTERVAL '50 days', starts_at - INTERVAL '2 hours',
+                    event_photo || '?auto=format&fit=crop&w=800&q=75', unit_price, ticket_quantity,
+                    0, ticket_quantity,
+                    CASE WHEN i = 17 THEN seed_now + INTERVAL '3 days' ELSE seed_now - INTERVAL '50 days' END,
+                    CASE WHEN i = 18 THEN seed_now - INTERVAL '1 day' ELSE starts_at - INTERVAL '2 hours' END,
                     CASE WHEN row_data.status IN ('APPROVED', 'ONGOING', 'COMPLETED') THEN 'ACTIVE' ELSE 'INACTIVE' END)
             RETURNING id INTO type_id;
             type_ids := array_append(type_ids, type_id);
@@ -262,23 +226,33 @@ BEGIN
         FOR j IN 1..2 LOOP
             INSERT INTO event_staffs (events_id, staff_id, assigned_by, status, created_at)
             VALUES (event_id, staff_ids[1 + (i + j - 2) % 4], organizer_ids[row_data.organizer_no],
-                    'ACTIVE', seed_now - INTERVAL '40 days');
+                    CASE WHEN i = 9 AND j = 2 THEN 'LOCKED' ELSE 'ACTIVE' END, seed_now - INTERVAL '40 days');
             INSERT INTO event_guests (events_id, name, role, description, image_url, created_at, updated_at)
-            VALUES (event_id, CASE j WHEN 1 THEN 'Nguyễn Hoàng Minh' ELSE 'Trần Ngọc Anh' END,
-                    CASE WHEN row_data.category_no = 1 THEN CASE j WHEN 1 THEN 'Ca sĩ' ELSE 'Nhạc sĩ' END
-                         ELSE CASE j WHEN 1 THEN 'Diễn giả' ELSE 'Khách mời' END END,
-                    'Khách mời đồng hành và giao lưu trong chương trình.',
-                    guest_images[1 + (i + j - 2) % cardinality(guest_images)],
+            VALUES (event_id,
+                    (ARRAY['Nguyễn Hoàng Minh','Trần Ngọc Anh','Đào Mai Chi','Lưu Mạnh Dũng',
+                           'Lê Khánh An','Đỗ Thùy Trang','Võ Nhật Quang','Lý Hà My',
+                           'Phạm Nam Sơn','Ngô Cẩm Tú','Đinh Anh Vũ','Vũ Hoài Thương'])
+                        [1 + (2 * (row_data.category_no - 1) + j - 1) % 12],
+                    CASE WHEN j = 2 THEN 'Người dẫn chương trình' ELSE
+                        (ARRAY['Nghệ sĩ','Kỹ sư','Nhà sáng lập','Huấn luyện viên','Tác giả','Điều phối viên'])[row_data.category_no] END,
+                    CASE WHEN j = 2 THEN 'Dẫn dắt chương trình và phần hỏi đáp với khán giả.' ELSE
+                        (ARRAY['Biểu diễn trực tiếp và giao lưu sau chương trình.',
+                               'Hướng dẫn thực hành và giải đáp các câu hỏi kỹ thuật.',
+                               'Chia sẻ kinh nghiệm đưa sản phẩm đầu tiên ra thị trường.',
+                               'Phụ trách khởi động và hướng dẫn kỹ thuật cho người mới.',
+                               'Giới thiệu tác phẩm và hướng dẫn buổi thực hành.',
+                               'Kết nối các nhóm tình nguyện và phụ trách hoạt động trải nghiệm.'])[row_data.category_no] END,
+                    photo_base || portraits[1 + (i + j - 2) % 4] || '?auto=format&fit=crop&w=200&q=75',
                     seed_now - INTERVAL '60 days', seed_now - INTERVAL '55 days');
         END LOOP;
     END LOOP;
 
-    -- 48 paid bookings: six for each approved/ongoing/completed/canceled event.
-    FOR i IN 1..10 LOOP
-        IF i IN (8, 9) THEN CONTINUE; END IF;
+    -- Six paid bookings per event with a sales history. Event 17 has yet to open.
+    FOR i IN 1..cardinality(event_ids) LOOP
+        IF i IN (8, 9, 17) THEN CONTINUE; END IF;
         SELECT * INTO STRICT event_row FROM events WHERE id = event_ids[i];
         FOR j IN 1..6 LOOP
-            user_id := customer_ids[1 + (i + j - 2) % 10];
+            user_id := customer_ids[1 + (i + j - 2) % 11];
             booked_at := least(seed_now - (j + 2) * INTERVAL '1 day', event_row.start_time - INTERVAL '3 days');
             type_number := 1 + (j - 1) % 3;
             type_id := type_ids[(i - 1) * 3 + type_number];
@@ -307,17 +281,17 @@ BEGIN
             fee := round(total * 0.05, 0);
             INSERT INTO payment_finances (payments_id, gross_amount, platform_fee, organizer_amount,
                                           credited, settled, reversed, created_at)
-            VALUES (payment_id, total, fee, total - fee, TRUE, i IN (6, 7), FALSE, booked_at + INTERVAL '2 minutes');
+            VALUES (payment_id, total, fee, total - fee, TRUE, i IN (6, 7, 16), FALSE, booked_at + INTERVAL '2 minutes');
 
             checkin_staff_id := staff_ids[1 + (i - 1) % 4];
             ticket_status := CASE WHEN i = 10 THEN 'CANCELED'
-                                  WHEN i IN (6, 7) OR (i = 5 AND j <= 3) THEN 'USED' ELSE 'VALID' END;
+                                  WHEN i IN (6, 7, 16) OR (i = 5 AND j <= 3) THEN 'USED' ELSE 'VALID' END;
             checked_at := CASE WHEN ticket_status = 'USED' THEN event_row.start_time + (j * 3) * INTERVAL '1 minute' END;
             FOR item_row IN SELECT id, quantity FROM booking_items WHERE bookings_id = booking_id ORDER BY id LOOP
                 FOR k IN 1..item_row.quantity LOOP
                     INSERT INTO tickets (booking_items_id, ticket_code, qr_token, status, checked_in_by, checked_in_at, created_at)
                     VALUES (item_row.id, 'EH-SEED-' || item_row.id || '-' || k,
-                            md5('eventhub-demo-qr-' || item_row.id || '-' || k), ticket_status,
+                            gen_random_uuid()::text, ticket_status,
                             CASE WHEN ticket_status = 'USED' THEN checkin_staff_id END, checked_at,
                             booked_at + INTERVAL '2 minutes');
                 END LOOP;
@@ -331,36 +305,21 @@ BEGIN
                     'BOOKING_CONFIRMED', j % 2 = 0, booked_at + INTERVAL '2 minutes');
 
             IF i = 10 THEN
-                refund_status := CASE j WHEN 1 THEN 'WAITING' WHEN 2 THEN 'COMPLETED'
-                                        WHEN 3 THEN 'COMPLETED' WHEN 4 THEN 'FAILED'
-                                        WHEN 5 THEN 'RECONCILIATION' ELSE 'WAITING' END;
-                refund_method := CASE WHEN j IN (2, 3, 4, 5) THEN 'VNPAY' END;
-                INSERT INTO refunds (payments_id, refund_transaction_id, amount, status, retry_count,
-                                     method, requested_by, provider_reference, response_code, transaction_status,
-                                     last_error, refunded_at, created_at, updated_at)
+                refund_status := CASE WHEN j IN (2,3) THEN 'COMPLETED' ELSE 'WAITING' END;
+                INSERT INTO refunds (payments_id, refund_transaction_id, amount, status, method,
+                                     requested_by, provider_reference, refunded_at, created_at, updated_at)
                 VALUES (payment_id, 'refund-' || payment_id, total, refund_status,
-                        CASE WHEN j IN (2, 3, 4, 5) THEN 1 ELSE 0 END, refund_method,
-                        CASE WHEN refund_method IS NOT NULL THEN admin_id END,
-                        CASE WHEN j IN (2, 3) THEN 'SEED-REFUND-VNPAY-' || payment_id END,
-                        CASE WHEN j IN (2, 3) THEN '00' WHEN j = 4 THEN '91' WHEN j = 5 THEN '94' END,
-                        CASE WHEN j IN (2, 3) THEN '00' WHEN j = 5 THEN '05' END,
-                        CASE WHEN j = 4 THEN 'Dữ liệu demo: cổng thanh toán từ chối yêu cầu hoàn tiền.'
-                             WHEN j = 5 THEN 'Dữ liệu demo: kết quả hoàn tiền cần đối soát.' END,
+                        CASE WHEN refund_status = 'COMPLETED' THEN 'INTERNAL' END,
+                        CASE WHEN refund_status = 'COMPLETED' THEN admin_id END,
+                        CASE WHEN refund_status = 'COMPLETED' THEN 'RF-' || replace(gen_random_uuid()::text, '-', '') END,
                         CASE WHEN refund_status = 'COMPLETED' THEN seed_now - INTERVAL '12 hours' END,
-                        seed_now - INTERVAL '1 day', seed_now - INTERVAL '12 hours') RETURNING id INTO refund_id;
+                        seed_now - INTERVAL '1 day',
+                        seed_now - CASE WHEN refund_status = 'COMPLETED' THEN INTERVAL '12 hours' ELSE INTERVAL '1 day' END);
                 IF refund_status = 'COMPLETED' THEN
                     UPDATE payment_finances SET reversed = TRUE WHERE payments_id = payment_id;
                     INSERT INTO notifications (users_id, title, content, type, is_read, created_at)
                     VALUES (user_id, 'Hoàn tiền thành công', 'Đã hoàn toàn bộ giao dịch #' || payment_id || '.',
                             'REFUND_COMPLETED', FALSE, seed_now - INTERVAL '12 hours');
-                END IF;
-                IF j IN (2, 3, 4, 5) THEN
-                    INSERT INTO refund_attempts (refunds_id, request_id, command, outcome, response_code,
-                                                 transaction_status, created_at, completed_at)
-                    VALUES (refund_id, md5('seed-refund-request-' || payment_id), 'refund', refund_status,
-                            CASE WHEN j IN (2, 3) THEN '00' WHEN j = 4 THEN '91' ELSE '94' END,
-                            CASE WHEN j IN (2, 3) THEN '00' WHEN j = 5 THEN '05' END,
-                            seed_now - INTERVAL '13 hours', seed_now - INTERVAL '12 hours');
                 END IF;
                 INSERT INTO notifications (users_id, title, content, type, is_read, created_at)
                 VALUES (user_id, 'Sự kiện đã hủy', 'Sự kiện ' || event_row.name || ' đã hủy. Vui lòng theo dõi thông tin hoàn tiền.',
@@ -431,15 +390,15 @@ BEGIN
         wallet_ids := array_append(wallet_ids, wallet_id);
     END LOOP;
 
-    -- Six withdrawal requests, funded by the two completed events; two payouts.
+    -- Approved, pending, rejected and withdrawn requests for the first two organizers.
     FOR i IN 1..2 LOOP
-        FOR j IN 1..3 LOOP
+        FOR j IN 1..4 LOOP
             total := CASE j WHEN 1 THEN 300000 WHEN 2 THEN 200000 ELSE 100000 END;
             INSERT INTO withdrawal_requests (organizer_wallets_id, processed_by, amount, bank_name, account_number,
                                               status, requested_at, processed_at, reject_reason, transaction_code, created_at, updated_at)
-            VALUES (wallet_ids[i], CASE WHEN j <> 2 THEN admin_id END, total, 'NCB', '00009900' || lpad(i::TEXT, 4, '0'),
-                    CASE j WHEN 1 THEN 'APPROVED' WHEN 2 THEN 'PENDING' ELSE 'REJECTED' END,
-                    seed_now - INTERVAL '3 days', CASE WHEN j <> 2 THEN seed_now - INTERVAL '2 days' END,
+            VALUES (wallet_ids[i], CASE WHEN j IN (1,3) THEN admin_id END, total, 'NCB', '00009900' || lpad(i::TEXT, 4, '0'),
+                    CASE j WHEN 1 THEN 'APPROVED' WHEN 2 THEN 'PENDING' WHEN 3 THEN 'REJECTED' ELSE 'CANCELLED' END,
+                    seed_now - INTERVAL '3 days', CASE WHEN j IN (1,3) THEN seed_now - INTERVAL '2 days' END,
                     CASE WHEN j = 3 THEN 'Thông tin tài khoản cần được xác minh lại.' END,
                     CASE WHEN j = 1 THEN 'SEED-PAYOUT-' || wallet_ids[i] END,
                     seed_now - INTERVAL '3 days', CASE WHEN j = 2 THEN seed_now - INTERVAL '3 days' ELSE seed_now - INTERVAL '2 days' END)
@@ -455,7 +414,7 @@ BEGIN
                 UPDATE organizer_wallets SET available_balance = available_balance - total,
                     withdrawal_pending_balance = withdrawal_pending_balance + total WHERE id = wallet_ids[i];
             END IF;
-            IF j <> 2 THEN
+            IF j IN (1,3) THEN
                 INSERT INTO notifications (users_id, title, content, type, is_read, created_at)
                 VALUES (organizer_ids[i], CASE WHEN j = 1 THEN 'Yêu cầu rút tiền đã được duyệt' ELSE 'Yêu cầu rút tiền bị từ chối' END,
                         'Kết quả xử lý yêu cầu rút tiền #' || withdrawal_id || '.',
@@ -464,26 +423,42 @@ BEGIN
         END LOOP;
     END LOOP;
 
-    -- 100 interactions spanning every customer and every demo event.
-    FOR i IN 1..10 LOOP
-        FOR j IN 1..10 LOOP
-            INSERT INTO user_event_interactions (users_id, events_id, interaction_type, created_at)
-            VALUES (customer_ids[i], event_ids[j], CASE WHEN (i + j) % 4 = 0 THEN 'FAVORITE' ELSE 'VIEW' END,
-                    seed_now - (i + j) * INTERVAL '1 hour');
+    -- Browse and recommendation histories use the same IDs as the catalog and purchases.
+    recommended := ARRAY[event_ids[1],event_ids[2],event_ids[3],event_ids[4],event_ids[11],event_ids[12]];
+    FOR i IN 1..11 LOOP
+        FOR j IN 1..6 LOOP
+            INSERT INTO user_event_interactions (users_id, events_id, interaction_type, dwell_seconds, created_at)
+            VALUES (customer_ids[i], recommended[j],
+                    (ARRAY['VIEW','CLICK','SEARCH_CLICK'])[1 + (i+j) % 3], 8 + i*j, seed_now - (i+j)*INTERVAL '1 hour');
         END LOOP;
+        j := 1 + (i-1) % 6;
+        SELECT min(created_at) INTO booked_at FROM bookings
+        WHERE users_id = customer_ids[i] AND events_id = recommended[j] AND status = 'PAID';
+        starts_at := coalesce(booked_at, seed_now - i * INTERVAL '1 hour') - INTERVAL '5 minutes';
+        INSERT INTO ai_recommendation_logs (users_id, recommended_ids, clicked_event_id, hit_rank, is_booked, created_at, clicked_at)
+        VALUES (customer_ids[i], recommended, recommended[j], j, booked_at IS NOT NULL, starts_at, starts_at + INTERVAL '1 minute');
     END LOOP;
+    INSERT INTO ai_recommendation_logs (recommended_ids, created_at) VALUES (recommended, seed_now);
+    INSERT INTO user_event_interactions (users_id, events_id, interaction_type, dwell_seconds, created_at)
+    SELECT users_id, events_id, 'BOOK', 0, updated_at FROM bookings WHERE events_id = ANY(event_ids) AND status='PAID';
 
-    -- Five short conversations, four messages each.
-    FOR i IN 1..5 LOOP
-        booked_at := seed_now - i * INTERVAL '1 day';
-        INSERT INTO ai_conversations (users_id, title, created_at, updated_at)
-        VALUES (customer_ids[i], 'Gợi ý sự kiện cuối tuần ' || i, booked_at, booked_at + INTERVAL '3 minutes')
+    FOR row_data IN SELECT * FROM (VALUES
+        (customer_ids[1], 'CUSTOMER', 'Đi đâu cùng bạn bè?', 'Có hoạt động nào miễn phí không?',
+         'Ngày hội Sách và Sống xanh có vé miễn phí. Bạn có thể xem lịch và chọn số lượng vé trong trang sự kiện.'),
+        (organizer_ids[1], 'ORGANIZER', 'Theo dõi doanh thu', 'Xem tiền có thể rút ở đâu?',
+         'Trong Ví nhà tổ chức, mục Số dư khả dụng hiển thị khoản bạn có thể yêu cầu rút sau khi sự kiện kết thúc.'),
+        (staff_ids[1], 'STAFF', 'Check-in tại cổng', 'Khách đưa vé điện tử thì tôi làm gì?',
+         'Mở sự kiện được phân công, quét QR hoặc nhập mã vé, rồi kiểm tra kết quả xác nhận.'),
+        (admin_id, 'ADMIN', 'Duyệt hoàn tiền', 'Hồ sơ nào cần được duyệt hoàn?',
+         'Vào phần quản lý hoàn tiền, chọn sự kiện đã hủy và xem các giao dịch đang chờ xử lý.')
+    ) AS chat(owner_id, owner_role, title, question, answer) LOOP
+        booked_at := seed_now - INTERVAL '2 hours';
+        INSERT INTO ai_conversations (users_id, owner_role, title, created_at, updated_at)
+        VALUES (row_data.owner_id, row_data.owner_role, row_data.title, booked_at, booked_at + INTERVAL '1 minute')
         RETURNING id INTO conversation_id;
         INSERT INTO ai_messages (ai_conversations_id, role, content, created_at) VALUES
-            (conversation_id, 'user', 'Có sự kiện nào phù hợp để đi cùng bạn bè không?', booked_at),
-            (conversation_id, 'assistant', 'Bạn có thể tham khảo các đêm nhạc, hội thảo hoặc ngày hội cộng đồng đang mở bán trên EventHub.', booked_at + INTERVAL '1 minute'),
-            (conversation_id, 'user', 'Tôi muốn xem thêm hoạt động miễn phí.', booked_at + INTERVAL '2 minutes'),
-            (conversation_id, 'assistant', 'Ngày hội Sách và Sống xanh có vé miễn phí. Bạn hãy mở chi tiết sự kiện để xem thời gian và địa điểm.', booked_at + INTERVAL '3 minutes');
+            (conversation_id, 'user', row_data.question, booked_at),
+            (conversation_id, 'assistant', row_data.answer, booked_at + INTERVAL '1 minute');
     END LOOP;
 
     INSERT INTO notifications (users_id, title, content, type, is_read, created_at) VALUES
@@ -492,8 +467,6 @@ BEGIN
         (organizer_ids[1], 'Sự kiện đang chờ duyệt', 'Jazz Night - Giai điệu mùa thu đã được gửi duyệt.', 'EVENT_PENDING_APPROVAL', FALSE, seed_now - INTERVAL '1 day'),
         (organizer_ids[3], 'Sự kiện đã hủy', 'Art & Light - Không gian sắc màu đã hủy và ngừng bán vé.', 'EVENT_CANCELED', FALSE, seed_now - INTERVAL '1 day');
 
-    RAISE NOTICE 'EventHub demo inserted: 18 users, 10 events, 30 ticket types, 58 bookings, 112 tickets, 7 refunds.';
+    RAISE NOTICE 'EventHub demo20 imported (20 events, 20 accounts).';
 END;
 $seed$;
-
-COMMIT;

@@ -1,0 +1,45 @@
+# Khi chạy backend trực tiếp, sao chép file này thành application-local.properties ở thư mục gốc.
+# Điền mật khẩu PostgreSQL và khóa JWT trước khi khởi động.
+
+# PostgreSQL
+spring.datasource.url=jdbc:postgresql://localhost:5432/eventhub_db
+spring.datasource.username=postgres
+spring.datasource.password=${DB_PASSWORD:}
+
+# Xác thực. Tạo khóa Base64 bằng PowerShell, rồi dán kết quả vào app.auth.jwt-secret
+# hoặc đặt biến môi trường JWT_SECRET.
+# $key = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($key); [Convert]::ToBase64String($key)
+app.auth.jwt-secret=${JWT_SECRET:}
+app.auth.cookie-secure=false
+app.auth.allowed-origins=http://localhost:5173,http://localhost:3000
+
+# Cloudinary (tải ảnh sự kiện, ảnh đại diện)
+app.cloudinary.cloud-name=${CLOUDINARY_CLOUD_NAME:}
+app.cloudinary.api-key=${CLOUDINARY_API_KEY:}
+app.cloudinary.api-secret=${CLOUDINARY_API_SECRET:}
+
+# VNPay Sandbox
+app.vnpay.tmn-code=${VNPAY_TMN_CODE:}
+app.vnpay.hash-secret=${VNPAY_HASH_SECRET:}
+app.vnpay.payment-url=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+app.vnpay.return-url=http://localhost:5173/customer/payment-result
+
+# Email xác nhận thanh toán. Bật sau khi điền thông tin SMTP.
+app.payment-email.enabled=false
+# app.payment-email.from=sender@example.com
+# spring.mail.host=smtp.example.com
+# spring.mail.port=587
+# spring.mail.username=sender@example.com
+# spring.mail.password=${SPRING_MAIL_PASSWORD:}
+
+# Chatbot OpenRouter. Điền API key và mã model khi sử dụng.
+app.ai.api-key=${OPENROUTER_API_KEY:}
+app.ai.model=${OPENROUTER_MODEL:}
+app.ai.max-tokens=1800
+app.ai.temperature=0.3
+app.ai.reasoning-enabled=
+app.ai.timeout=45s
+
+# Tác vụ định kỳ chuyển doanh thu vào số dư khả dụng
+app.finance.worker-enabled=true
+app.finance.worker-delay=30s
